@@ -366,23 +366,23 @@ function formatReferences(ctx: AgentContext): string {
 }
 
 async function main(): Promise<void> {
-  // Auto-detect artifact directory from project config if not specified
-  let artifactDir = args.db;
-  if (!artifactDir) {
-    // Try to find artifact in project root
+  // Auto-detect artipod directory from project config if not specified
+  let artipodDir = args.db;
+  if (!artipodDir) {
+    // Try to find artipod in project root
     const { config } = await loadProjectConfig(process.cwd());
     const projectRoot = resolveContentRoot(config, process.cwd());
-    artifactDir = path.join(projectRoot, 'artifact');
+    artipodDir = path.join(projectRoot, 'artipod');
     
     // Fallback to current directory
-    if (!fs.existsSync(artifactDir)) {
-      artifactDir = './artifact';
+    if (!fs.existsSync(artipodDir)) {
+      artipodDir = './artipod';
     }
   }
   
-  artifactDir = path.resolve(artifactDir);
-  const indexPath = path.join(artifactDir, 'index.sqlite');
-  const manifestPath = path.join(artifactDir, 'manifest.json');
+  artipodDir = path.resolve(artipodDir);
+  const indexPath = path.join(artipodDir, 'index.sqlite');
+  const manifestPath = path.join(artipodDir, 'manifest.json');
 
   if (!fs.existsSync(indexPath)) {
     console.error(`❌ Index not found: ${indexPath}`);

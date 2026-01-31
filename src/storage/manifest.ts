@@ -1,7 +1,7 @@
 /**
  * Manifest Generator
  * 
- * Creates manifest.json with build metadata for the artifact.
+ * Creates manifest.json with build metadata for the artipod.
  */
 import * as fs from 'fs';
 import * as path from 'path';

@@ -62,7 +62,7 @@ function computeFileHash(content: string): string {
 export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
   const hugoRoot = path.resolve(options.root);
   const contentDir = path.join(hugoRoot, options.content);
-  const artifactDir = path.resolve(options.out);
+  const artipodDir = path.resolve(options.out);
   
   // Validate paths
   if (!fs.existsSync(hugoRoot)) {
@@ -73,9 +73,9 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
   }
 
   // Ensure output directories
-  ensureDir(artifactDir);
-  const indexPath = path.join(artifactDir, 'index.sqlite');
-  const manifestPath = path.join(artifactDir, 'manifest.json');
+  ensureDir(artipodDir);
+  const indexPath = path.join(artipodDir, 'index.sqlite');
+  const manifestPath = path.join(artipodDir, 'manifest.json');
 
   // Initialize unified SQLite store
   const store = new SqliteStore({ dbPath: indexPath, dimension: options.embeddingDim });

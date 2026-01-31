@@ -1,6 +1,6 @@
 # docidx
 
-Hugo content index compiler that produces portable SQLite hybrid index artifacts (sqlite-vec + FTS5) for server-side RAG consumption.
+Hugo content index compiler that produces portable SQLite hybrid index artipods (sqlite-vec + FTS5) for server-side RAG consumption.
 
 See https://alexgarcia.xyz/sqlite-vec/wasm.html for in browser example
 
@@ -39,7 +39,7 @@ npm run docidx -- build --embedding-model text-embedding-3-small
 
 - `--root <path>` - Hugo project root (auto-detected by finding content/ directory)
 - `--content <path>` - Content directory relative to root (default: content)
-- `--out <path>` - Output artifact directory (default: ./artifact relative to Hugo root)
+- `--out <path>` - Output artipod directory (default: ./artipod relative to Hugo root)
 - `--clean` - Remove existing index and rebuild from scratch
 - `--incremental` - Only process changed files
 - `--include-drafts` - Include draft documents
@@ -89,10 +89,10 @@ npm run docidx -- query --hybrid "patient registration" --k 5
 - `OPENAI_API_KEY` - Required only if using OpenAI embeddings (not needed for Ollama)
 - `LOG_LEVEL` - Logging verbosity (debug, info, warn, error)
 
-## Artifact Structure
+## Artipod Structure
 
 ```
-artifact/
+artipod/
 ├── index.sqlite       # Unified SQLite database (vectors + FTS)
 └── manifest.json      # Build metadata and configuration
 ```
@@ -110,7 +110,7 @@ artifact/
 ### manifest.json
 
 Contains:
-- `schema_version` - Artifact schema version
+- `schema_version` - Artipod schema version
 - `build_time_utc` - Build timestamp
 - `source_git_commit` - Git commit hash (if available)
 - `chunking` - Chunking parameters (max_tokens, overlap)
@@ -123,7 +123,7 @@ Contains:
 
 ```bash
 # Run with tsx for development
-npm run docidx -- build --root ../.. --content content --out ./artifact --clean --embedding-model mock
+npm run docidx -- build --root ../.. --content content --out ./artipod --clean --embedding-model mock
 
 # Build TypeScript
 npm run build

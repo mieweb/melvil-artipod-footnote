@@ -14,6 +14,8 @@ import { createEmbedder, Embedder } from '../embedder/embedder.js';
 import { SqliteStore } from '../storage/sqlite.js';
 import { readManifest } from '../storage/manifest.js';
 
+const DEFAULT_ARTIPOD_DIR = './artipod';
+
 type SearchMode = 'hybrid' | 'vector' | 'fts' | 'literal';
 
 /**
@@ -132,7 +134,7 @@ async function runSearch(
 const args = minimist(process.argv.slice(2), {
   string: ['db', 'mode', 'query', 'q'],
   default: {
-    db: './artifact',
+    db: DEFAULT_ARTIPOD_DIR,
     mode: 'hybrid'  // hybrid, vector, fts, literal
   }
 });
@@ -141,9 +143,9 @@ const args = minimist(process.argv.slice(2), {
 const cliQuery = args.query || args.q || args._[0] || null;
 
 async function main(): Promise<void> {
-  const artifactDir = path.resolve(args.db);
-  const indexPath = path.join(artifactDir, 'index.sqlite');
-  const manifestPath = path.join(artifactDir, 'manifest.json');
+  const artipodDir = path.resolve(args.db);
+  const indexPath = path.join(artipodDir, 'index.sqlite');
+  const manifestPath = path.join(artipodDir, 'manifest.json');
 
   // Validate paths
   if (!fs.existsSync(indexPath)) {

@@ -1,7 +1,7 @@
 /**
  * docidx - Markdown Content Index Compiler
  * 
- * Produces portable SQLite hybrid index artifacts (sqlite-vec + FTS5)
+ * Produces portable SQLite hybrid index artipods (sqlite-vec + FTS5)
  * from Hugo/markdown content for server-side RAG consumption.
  */
 

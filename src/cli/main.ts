@@ -1,7 +1,7 @@
 /**
  * docidx - Markdown Content Index Compiler
  * 
- * Produces portable SQLite hybrid index artifacts (sqlite-vec + FTS5)
+ * Produces portable SQLite hybrid index artipods (sqlite-vec + FTS5)
  * from Hugo/markdown content for server-side RAG consumption.
  */
 import minimist from 'minimist';
@@ -52,20 +52,20 @@ function findHugoRoot(startDir: string): string | null {
 }
 
 /**
- * Check if an artifact directory has a complete index (with manifest)
+ * Check if an artipod directory has a complete index (with manifest)
  */
-function artifactComplete(artifactDir: string): boolean {
-  const manifestPath = path.join(artifactDir, 'manifest.json');
-  const indexPath = path.join(artifactDir, 'index.sqlite');
+function artipodComplete(artipodDir: string): boolean {
+  const manifestPath = path.join(artipodDir, 'manifest.json');
+  const indexPath = path.join(artipodDir, 'index.sqlite');
   
   return fs.existsSync(manifestPath) && fs.existsSync(indexPath);
 }
 
 /**
- * Check if an artifact directory has a partial index (resumable)
+ * Check if an artipod directory has a partial index (resumable)
  */
-function artifactResumable(artifactDir: string): boolean {
-  const indexPath = path.join(artifactDir, 'index.sqlite');
+function artipodResumable(artipodDir: string): boolean {
+  const indexPath = path.join(artipodDir, 'index.sqlite');
   return fs.existsSync(indexPath);
 }
 
@@ -87,7 +87,7 @@ CONFIGURATION:
 BUILD OPTIONS:
   --root <path>         Project root (auto-detected if not specified)
   --content <path>      Content directory relative to root (default: content)
-  --out <path>          Output artifact directory (default: ./artifact)
+  --out <path>          Output artipod directory (default: ./artipod)
   --clean               Remove existing index and rebuild from scratch
   --incremental         Only process changed files (auto: incremental if exists, clean if not)
   --include-drafts      Include draft documents (draft: true in front matter)
@@ -100,10 +100,10 @@ BUILD OPTIONS:
   --pull                Automatically pull Ollama model if not installed
   --max-tokens <n>      Max tokens per chunk (default: 500)
   --overlap <n>         Token overlap between chunks (default: 80)
-  --compress            Generate artifact.tar.zst after build
+  --compress            Generate artipod.tar.zst after build
 
 QUERY OPTIONS:
-  --db <path>           Path to artifact directory (default: ./artifact)
+  --db <path>           Path to artipod directory (default: ./artipod)
   --hybrid <query>      Query string for hybrid search
   --k <n>               Number of results to return (default: 10)
 
@@ -195,19 +195,19 @@ async function main(): Promise<void> {
         }
 
         // Default output directory
-        const out = args.out || path.join(root, 'artifact');
+        const out = args.out || path.join(root, 'artipod');
 
-        // Auto-detect clean vs incremental based on artifact existence
+        // Auto-detect clean vs incremental based on artipod existence
         let clean = args.clean;
-        const hasCompleteArtifact = artifactComplete(out);
-        const hasResumableArtifact = artifactResumable(out);
+        const hasCompleteArtipod = artipodComplete(out);
+        const hasResumableArtipod = artipodResumable(out);
         
         if (!args.clean && !args.incremental) {
           // Neither explicitly set - auto-detect
-          if (hasCompleteArtifact) {
+          if (hasCompleteArtipod) {
             clean = false;
             logger.info(`Existing index found, using incremental mode`);
-          } else if (hasResumableArtifact) {
+          } else if (hasResumableArtipod) {
             clean = false;
             logger.info(`Partial index found, resuming build`);
           } else {
@@ -221,7 +221,7 @@ async function main(): Promise<void> {
         let embeddingDim = args['embedding-dim'];
         let existingManifest: ReturnType<typeof readManifest> = null;
         
-        if (!clean && hasCompleteArtifact) {
+        if (!clean && hasCompleteArtipod) {
           const manifestPath = path.join(out, 'manifest.json');
           existingManifest = readManifest(manifestPath);
           
@@ -343,8 +343,8 @@ async function main(): Promise<void> {
 
       case 'query': {
         // Default db path
-        const dbPath = args.db || './artifact';
-        if (!artifactComplete(dbPath)) {
+        const dbPath = args.db || './artipod';
+        if (!artipodComplete(dbPath)) {
           logger.error(`No complete index found at ${dbPath}. Run 'docidx build' first.`);
           process.exit(1);
         }
