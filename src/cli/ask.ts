@@ -19,13 +19,14 @@ import { loadProjectConfig, resolveContentRoot } from '../config/index.js';
 
 const args = minimist(process.argv.slice(2), {
   string: ['db', 'model'],
-  boolean: ['verbose', 'interactive'],
-  alias: { v: 'verbose', i: 'interactive' },
+  boolean: ['verbose', 'interactive', 'chunks'],
+  alias: { v: 'verbose', i: 'interactive', c: 'chunks' },
   default: {
     db: '',  // Empty = auto-detect from project root
     model: '',  // Empty = use manifest default or fallback
     verbose: false,
-    interactive: false
+    interactive: false,
+    chunks: false  // Show full chunk content
   }
 });
 
@@ -36,7 +37,9 @@ const cliQuery = args._[0] || null;
  * These describe the search capabilities available in any docidx index.
  */
 const TOOLS_DEFINITION = `
-You have access to the following tools to search documentation:
+You have access to the following tools to search and read documentation:
+
+## Search Tools (return chunks/snippets)
 
 1. search_hybrid(query: string, limit?: number)
    - Best for natural language questions
@@ -54,9 +57,25 @@ You have access to the following tools to search documentation:
    - Finds special characters like ^, |, %, etc.
    - Use for: code snippets, exact identifiers, URLs, regex patterns
 
+## Document Tools (read full documents)
+
+4. read_document(doc_id: string)
+   - Read the FULL content of a document (all chunks combined)
+   - Use when a search result snippet seems relevant but you need more context
+   - Pass the doc_id or URL from a search result
+
+5. find_related(doc_id: string, limit?: number)
+   - Find documents that reference or link to the given document
+   - Useful to discover related topics or see how a feature connects to others
+
 To use a tool, respond with a JSON block:
 \`\`\`tool
 {"tool": "search_fts", "query": "some search term", "limit": 5}
+\`\`\`
+
+Or for reading a full document:
+\`\`\`tool
+{"tool": "read_document", "doc_id": "functions/scheduling.md"}
 \`\`\`
 
 You can call multiple tools in sequence. After gathering enough information, provide your final answer.
@@ -79,14 +98,15 @@ interface SearchResult {
   headings: string[];
   content: string;
   score: number;
-  method: 'hybrid' | 'fts' | 'literal';
+  method: 'hybrid' | 'fts' | 'literal' | 'document' | 'related';
   vectorRank?: number;
   ftsRank?: number;
 }
 
 interface ToolCall {
   tool: string;
-  query: string;
+  query?: string;
+  doc_id?: string;
   limit?: number;
 }
 
@@ -98,21 +118,24 @@ interface AgentContext {
   verbose: boolean;
   searchResults: Map<string, SearchResult>;  // Deduplicated results by chunk_id
   resultOrder: string[];  // Order of first appearance
+  showChunks: boolean;  // Whether to display full chunk content
 }
 
 /**
  * Execute a tool call and return formatted results
  */
 async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<string> {
-  const { tool, query, limit = 5 } = toolCall;
+  const { tool, query, doc_id, limit = 5 } = toolCall;
   let results: SearchResult[] = [];
 
   if (ctx.verbose) {
-    console.log(`   🔧 ${tool}("${query}", ${limit})`);
+    const arg = query || doc_id || '';
+    console.log(`   🔧 ${tool}("${arg}"${limit !== 5 ? `, ${limit}` : ''})`);
   }
 
   switch (tool) {
     case 'search_hybrid': {
+      if (!query) return `Error: search_hybrid requires a query`;
       const [queryVector] = await ctx.embedder.embed([query]);
       const hybridResults = ctx.store.hybridSearch(queryVector, query, limit);
       results = hybridResults.map(r => ({
@@ -131,6 +154,7 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<strin
     }
     
     case 'search_fts': {
+      if (!query) return `Error: search_fts requires a query`;
       const ftsResults = ctx.store.ftsSearch(query, limit);
       results = ftsResults.map((r, i) => ({
         chunk_id: r.chunk_id,
@@ -147,6 +171,7 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<strin
     }
     
     case 'search_literal': {
+      if (!query) return `Error: search_literal requires a query`;
       const literalResults = ctx.store.literalSearch(query, limit);
       results = literalResults.map((r, i) => ({
         chunk_id: r.chunk_id,
@@ -160,6 +185,72 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<strin
         ftsRank: i + 1  // Use ftsRank for display consistency
       }));
       break;
+    }
+
+    case 'read_document': {
+      const docIdentifier = doc_id || query;
+      if (!docIdentifier) return `Error: read_document requires a doc_id`;
+      
+      const chunks = ctx.store.getDocumentChunks(docIdentifier);
+      if (chunks.length === 0) {
+        return `No document found matching "${docIdentifier}"`;
+      }
+
+      // Combine all chunks into full document
+      const fullContent = chunks.map(c => c.content).join('\n\n');
+      const doc = chunks[0];
+      
+      // Create a single "result" representing the full document
+      const docResult: SearchResult = {
+        chunk_id: `${doc.doc_id}:full`,
+        doc_id: doc.doc_id,
+        url: doc.url,
+        title: doc.title,
+        headings: [],
+        content: fullContent,
+        score: 1,
+        method: 'document' as const
+      };
+
+      // Add to context
+      if (!ctx.searchResults.has(docResult.chunk_id)) {
+        ctx.searchResults.set(docResult.chunk_id, docResult);
+        ctx.resultOrder.push(docResult.chunk_id);
+      }
+
+      const globalIdx = ctx.resultOrder.indexOf(docResult.chunk_id) + 1;
+      const tokenEst = Math.ceil(fullContent.length / 4);
+
+      if (ctx.showChunks) {
+        console.log(`\n   📖 Full document: ${doc.title}`);
+        console.log(`       URL: ${doc.url}`);
+        console.log(`       ${chunks.length} chunks, ~${tokenEst} tokens`);
+        console.log(`   ─────────────────────────────────────────────`);
+        console.log(fullContent.split('\n').map(line => `   ${line}`).join('\n'));
+        console.log('');
+      }
+
+      return `[${globalIdx}] Full document: ${doc.title}\n    URL: ${doc.url}\n    (${chunks.length} chunks, ~${tokenEst} tokens)\n\n${fullContent}`;
+    }
+
+    case 'find_related': {
+      const docIdentifier = doc_id || query;
+      if (!docIdentifier) return `Error: find_related requires a doc_id`;
+      
+      const related = ctx.store.findRelatedDocuments(docIdentifier, limit);
+      if (related.length === 0) {
+        return `No related documents found for "${docIdentifier}"`;
+      }
+
+      const formatted = related.map((r, i) => 
+        `${i + 1}. ${r.title}\n   URL: ${r.url}\n   doc_id: ${r.doc_id}`
+      ).join('\n\n');
+
+      if (ctx.verbose) {
+        console.log(`   📎 Found ${related.length} related documents`);
+      }
+
+      return `Found ${related.length} related documents:\n\n${formatted}\n\nUse read_document to read any of these.`;
     }
     
     default:
@@ -175,6 +266,26 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<strin
     if (!ctx.searchResults.has(r.chunk_id)) {
       ctx.searchResults.set(r.chunk_id, r);
       ctx.resultOrder.push(r.chunk_id);
+    }
+  }
+
+  // Show chunks if requested
+  if (ctx.showChunks) {
+    console.log(`\n   📄 Chunks retrieved (${results.length}):`);
+    for (const r of results) {
+      const globalIdx = ctx.resultOrder.indexOf(r.chunk_id) + 1;
+      const location = r.headings.length > 0
+        ? `${r.title} > ${r.headings.join(' > ')}`
+        : r.title;
+      const tokenEst = Math.ceil(r.content.length / 4);  // ~4 chars per token
+      console.log(`   ─────────────────────────────────────────────`);
+      console.log(`   [${globalIdx}] ${location}`);
+      console.log(`       URL: ${r.url}`);
+      console.log(`       Chunk ID: ${r.chunk_id}`);
+      console.log(`       ~${tokenEst} tokens, ${r.content.length} chars`);
+      console.log(`   ─────────────────────────────────────────────`);
+      console.log(r.content.split('\n').map(line => `   ${line}`).join('\n'));
+      console.log('');
     }
   }
 
@@ -203,7 +314,7 @@ function parseToolCalls(response: string): ToolCall[] {
   while ((match = toolBlockRegex.exec(response)) !== null) {
     try {
       const parsed = JSON.parse(match[1].trim());
-      if (parsed.tool && parsed.query) {
+      if (parsed.tool && (parsed.query || parsed.doc_id)) {
         toolCalls.push(parsed);
       }
     } catch {
@@ -213,11 +324,12 @@ function parseToolCalls(response: string): ToolCall[] {
   
   // Also try bare JSON objects with "tool" key
   if (toolCalls.length === 0) {
-    const jsonRegex = /\{[^{}]*"tool"\s*:\s*"[^"]+"\s*,\s*"query"\s*:\s*"[^"]*"[^{}]*\}/g;
+    // Match JSON with either query or doc_id
+    const jsonRegex = /\{[^{}]*"tool"\s*:\s*"[^"]+"[^{}]*(?:"query"|"doc_id")\s*:\s*"[^"]*"[^{}]*\}/g;
     while ((match = jsonRegex.exec(response)) !== null) {
       try {
         const parsed = JSON.parse(match[0]);
-        if (parsed.tool && parsed.query) {
+        if (parsed.tool && (parsed.query || parsed.doc_id)) {
           toolCalls.push(parsed);
         }
       } catch {
@@ -426,7 +538,8 @@ async function main(): Promise<void> {
       model: agentModel,
       verbose: args.verbose,
       searchResults: new Map(),
-      resultOrder: []
+      resultOrder: [],
+      showChunks: args.chunks
     };
 
     console.log('\n' + '─'.repeat(60));

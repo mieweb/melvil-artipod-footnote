@@ -589,6 +589,101 @@ export class SqliteStore {
   }
 
   /**
+   * Get all chunks for a document (by doc_id or URL)
+   * Returns chunks ordered by their sequence in the document
+   */
+  getDocumentChunks(docIdOrUrl: string): Array<ChunkRecord> {
+    // Normalize: strip .md suffix and leading/trailing slashes
+    const normalized = docIdOrUrl.replace(/\.md$/i, '').replace(/^\/+|\/+$/g, '');
+    
+    const rows = this.db.prepare(`
+      SELECT 
+        chunk_id, doc_id, path, url, title, section, 
+        tags, date, headings, content, content_hash, updated_at
+      FROM chunks 
+      WHERE doc_id = ? OR url = ? OR url LIKE ? OR url LIKE ?
+      ORDER BY chunk_id
+    `).all(docIdOrUrl, docIdOrUrl, `%${docIdOrUrl}%`, `%${normalized}%`) as Array<{
+      chunk_id: string;
+      doc_id: string;
+      path: string;
+      url: string;
+      title: string;
+      section: string;
+      tags: string;
+      date: string;
+      headings: string;
+      content: string;
+      content_hash: string;
+      updated_at: number;
+    }>;
+
+    return rows.map(row => ({
+      chunk_id: row.chunk_id,
+      doc_id: row.doc_id,
+      path: row.path,
+      url: row.url,
+      title: row.title,
+      section: row.section,
+      tags: JSON.parse(row.tags),
+      date: row.date,
+      headings: JSON.parse(row.headings),
+      content: row.content,
+      content_hash: row.content_hash,
+      updated_at: row.updated_at,
+      vector: []
+    }));
+  }
+
+  /**
+   * List all unique documents with their titles and URLs
+   */
+  listDocuments(): Array<{ doc_id: string; url: string; title: string; chunk_count: number }> {
+    const rows = this.db.prepare(`
+      SELECT 
+        doc_id, 
+        url, 
+        title, 
+        COUNT(*) as chunk_count
+      FROM chunks 
+      GROUP BY doc_id
+      ORDER BY title
+    `).all() as Array<{
+      doc_id: string;
+      url: string;
+      title: string;
+      chunk_count: number;
+    }>;
+
+    return rows;
+  }
+
+  /**
+   * Find documents that link to the given document (by path matching in content)
+   */
+  findRelatedDocuments(docPath: string, limit: number = 5): Array<{ doc_id: string; url: string; title: string }> {
+    // Extract filename from path for matching
+    const filename = docPath.split('/').pop()?.replace(/\.md$/, '') || docPath;
+    
+    const rows = this.db.prepare(`
+      SELECT DISTINCT 
+        doc_id, 
+        url, 
+        title
+      FROM chunks 
+      WHERE content LIKE ? OR content LIKE ?
+      ORDER BY title
+      LIMIT ?
+    `).all(`%](${filename}%`, `%](../${filename}%`, limit) as Array<{
+      doc_id: string;
+      url: string;
+      title: string;
+    }>;
+
+    return rows;
+  }
+
+  /**
    * Get stored dimension from metadata
    */
   getStoredDimension(): number | null {
