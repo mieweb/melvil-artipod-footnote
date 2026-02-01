@@ -175,10 +175,13 @@ This copies markdown files to `artipod/content/` (~3MB for 1000 docs).
 
 ## Artipod Structure
 
+See [ARTIPOD-README.md](ARTIPOD-README.md) for the full specification.
+
 ```
 artipod/
-├── index.sqlite       # Unified SQLite database (vectors + FTS)
-└── manifest.json      # Build metadata and configuration
+├── index.sqlite       # SQLite database (vectors + FTS)
+├── manifest.json      # Build metadata and configuration
+└── content/           # (optional) Raw markdown for grep search
 ```
 
 ### index.sqlite Schema
