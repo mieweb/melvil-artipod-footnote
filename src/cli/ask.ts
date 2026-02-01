@@ -10,6 +10,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as readline from 'readline';
+import { execSync } from 'child_process';
 import minimist from 'minimist';
 
 import { createEmbedder, Embedder } from '../embedder/embedder.js';
@@ -35,8 +36,30 @@ const cliQuery = args._[0] || null;
 /**
  * Tool definitions for the LLM - generic, not application-specific
  * These describe the search capabilities available in any docidx index.
+ * 
+ * The grep tool is conditionally included based on whether content
+ * was copied during build (indicated by manifest.content_copy.enabled).
  */
-const TOOLS_DEFINITION = `
+function buildToolsDefinition(manifest: ManifestData): string {
+  const grepEnabled = manifest.content_copy?.enabled === true;
+  
+  const grepTool = grepEnabled ? `
+4. search_grep(query: string, limit?: number)
+   - Unix grep search on raw markdown files
+   - Useful for pattern matching or comparing performance with SQLite search
+   - Returns file paths and matching lines
+` : '';
+
+  const toolCount = grepEnabled ? '6' : '5';
+  const toolNumbers = grepEnabled ? {
+    readDoc: '5',
+    findRelated: '6'
+  } : {
+    readDoc: '4',
+    findRelated: '5'
+  };
+
+  return `
 You have access to the following tools to search and read documentation:
 
 ## Search Tools (return chunks/snippets)
@@ -56,15 +79,15 @@ You have access to the following tools to search and read documentation:
    - Exact substring match (case-insensitive)
    - Finds special characters like ^, |, %, etc.
    - Use for: code snippets, exact identifiers, URLs, regex patterns
-
+${grepTool}
 ## Document Tools (read full documents)
 
-4. read_document(doc_id: string)
+${toolNumbers.readDoc}. read_document(doc_id: string)
    - Read the FULL content of a document (all chunks combined)
    - Use when a search result snippet seems relevant but you need more context
    - Pass the doc_id or URL from a search result
 
-5. find_related(doc_id: string, limit?: number)
+${toolNumbers.findRelated}. find_related(doc_id: string, limit?: number)
    - Find documents that reference or link to the given document
    - Useful to discover related topics or see how a feature connects to others
 
@@ -81,13 +104,15 @@ Or for reading a full document:
 You can call multiple tools in sequence. After gathering enough information, provide your final answer.
 When answering, cite sources using [1], [2], etc. matching the document numbers in the search results.
 `;
+}
 
 /**
  * Build the system prompt by interpolating {{TOOLS}} placeholder with actual tools definition
  */
 function buildSystemPrompt(manifest: ManifestData): string {
   const template = manifest.agent?.system_prompt || DEFAULT_SYSTEM_PROMPT;
-  return template.replace('{{TOOLS}}', TOOLS_DEFINITION.trim());
+  const toolsDefinition = buildToolsDefinition(manifest);
+  return template.replace('{{TOOLS}}', toolsDefinition.trim());
 }
 
 interface SearchResult {
@@ -98,7 +123,7 @@ interface SearchResult {
   headings: string[];
   content: string;
   score: number;
-  method: 'hybrid' | 'fts' | 'literal' | 'document' | 'related';
+  method: 'hybrid' | 'fts' | 'literal' | 'document' | 'related' | 'grep';
   vectorRank?: number;
   ftsRank?: number;
 }
@@ -119,6 +144,7 @@ interface AgentContext {
   searchResults: Map<string, SearchResult>;  // Deduplicated results by chunk_id
   resultOrder: string[];  // Order of first appearance
   showChunks: boolean;  // Whether to display full chunk content
+  artipodDir: string;  // Path to artipod directory (for grep search)
 }
 
 /**
@@ -251,6 +277,88 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<strin
       }
 
       return `Found ${related.length} related documents:\n\n${formatted}\n\nUse read_document to read any of these.`;
+    }
+
+    case 'search_grep': {
+      if (!query) return `Error: search_grep requires a query`;
+      
+      // Check if grep is enabled via manifest
+      if (!ctx.manifest.content_copy?.enabled) {
+        return `Error: search_grep is not available. Rebuild with --copy-content to enable.`;
+      }
+      
+      const contentDir = path.join(ctx.artipodDir, 'content');
+      if (!fs.existsSync(contentDir)) {
+        return `Error: Content directory not found at ${contentDir}. Index may need rebuilding.`;
+      }
+
+      const startTime = performance.now();
+      try {
+        // Use grep to search markdown files
+        // -r: recursive, -i: case insensitive, -l: files only, -n: line numbers
+        const escapedQuery = query.replace(/['"\\]/g, '\\$&');
+        const grepCmd = `grep -rin --include="*.md" "${escapedQuery}" "${contentDir}" | head -${limit * 10}`;
+        
+        const output = execSync(grepCmd, { 
+          encoding: 'utf-8',
+          maxBuffer: 10 * 1024 * 1024  // 10MB buffer
+        });
+        
+        const endTime = performance.now();
+        const elapsed = (endTime - startTime).toFixed(1);
+
+        // Parse grep output: file:line:content
+        const lines = output.trim().split('\n').filter(l => l.length > 0);
+        
+        // Group by file and take first N files
+        const fileMatches = new Map<string, { line: number; content: string }[]>();
+        for (const line of lines) {
+          const match = line.match(/^(.+?):(\d+):(.*)$/);
+          if (match) {
+            const [, filePath, lineNum, content] = match;
+            const relPath = filePath.replace(contentDir + '/', '');
+            if (!fileMatches.has(relPath)) {
+              fileMatches.set(relPath, []);
+            }
+            fileMatches.get(relPath)!.push({ 
+              line: parseInt(lineNum), 
+              content: content.trim().slice(0, 200) 
+            });
+          }
+        }
+
+        // Convert to results
+        const uniqueFiles = [...fileMatches.keys()].slice(0, limit);
+        results = uniqueFiles.map((relPath, i) => {
+          const matches = fileMatches.get(relPath)!;
+          const url = '/' + relPath.replace(/\.md$/, '/').replace(/\/_index\//, '/');
+          const title = path.basename(relPath, '.md').replace(/-/g, ' ');
+          const snippets = matches.slice(0, 3).map(m => `L${m.line}: ${m.content}`).join('\n');
+          
+          return {
+            chunk_id: `grep_${relPath}_${i}`,
+            doc_id: relPath,
+            url,
+            title,
+            headings: [],
+            content: snippets,
+            score: matches.length,
+            method: 'grep' as const,
+            ftsRank: i + 1
+          };
+        });
+
+        if (ctx.verbose) {
+          console.log(`   ⏱️  grep completed in ${elapsed}ms, ${lines.length} matches in ${fileMatches.size} files`);
+        }
+      } catch (error) {
+        // grep returns exit code 1 if no matches
+        if ((error as any).status === 1) {
+          return `No grep matches found for "${query}"`;
+        }
+        return `Grep error: ${(error as Error).message}`;
+      }
+      break;
     }
     
     default:
@@ -539,7 +647,8 @@ async function main(): Promise<void> {
       verbose: args.verbose,
       searchResults: new Map(),
       resultOrder: [],
-      showChunks: args.chunks
+      showChunks: args.chunks,
+      artipodDir
     };
 
     console.log('\n' + '─'.repeat(60));

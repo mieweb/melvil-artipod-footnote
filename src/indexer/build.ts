@@ -40,6 +40,7 @@ export interface BuildOptions {
   maxTokens: number;
   overlap: number;
   compress: boolean;
+  copyContent: boolean;  // Copy source files to artipod for grep search
   config: DocidxConfig;  // Project configuration
 }
 
@@ -54,6 +55,38 @@ export interface BuildResult {
  */
 function computeFileHash(content: string): string {
   return createHash('sha256').update(content).digest('hex').slice(0, 16);
+}
+
+/**
+ * Recursively copy a directory, preserving structure
+ */
+function copyContentDir(src: string, dest: string): void {
+  // Remove existing content copy
+  if (fs.existsSync(dest)) {
+    fs.rmSync(dest, { recursive: true });
+  }
+  fs.mkdirSync(dest, { recursive: true });
+  
+  const copyRecursive = (srcDir: string, destDir: string) => {
+    const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(srcDir, entry.name);
+      const destPath = path.join(destDir, entry.name);
+      
+      if (entry.isDirectory()) {
+        // Skip .assets folders and hidden directories
+        if (entry.name.endsWith('.assets') || entry.name.startsWith('.')) {
+          continue;
+        }
+        fs.mkdirSync(destPath, { recursive: true });
+        copyRecursive(srcPath, destPath);
+      } else if (entry.name.endsWith('.md')) {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  };
+  
+  copyRecursive(src, dest);
 }
 
 /**
@@ -76,6 +109,14 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
   ensureDir(artipodDir);
   const indexPath = path.join(artipodDir, 'index.sqlite');
   const manifestPath = path.join(artipodDir, 'manifest.json');
+
+  // Copy content files if requested (for grep-based search comparison)
+  const contentCopyDir = path.join(artipodDir, 'content');
+  if (options.copyContent) {
+    logger.info('Copying content files to artipod for grep search...');
+    copyContentDir(contentDir, contentCopyDir);
+    logger.info(`Content copied to ${contentCopyDir}`);
+  }
 
   // Initialize unified SQLite store
   const store = new SqliteStore({ dbPath: indexPath, dimension: options.embeddingDim });
@@ -289,6 +330,7 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
       docCount,
       chunkCount,
       filters: Object.keys(options.filters).length > 0 ? options.filters : undefined,
+      contentCopy: options.copyContent,
       systemPrompt: options.config.agent?.systemPrompt,
       agentModel: options.config.agent?.model,
       agentMaxIterations: options.config.agent?.maxIterations

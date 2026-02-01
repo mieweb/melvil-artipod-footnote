@@ -101,6 +101,7 @@ BUILD OPTIONS:
   --max-tokens <n>      Max tokens per chunk (default: 500)
   --overlap <n>         Token overlap between chunks (default: 80)
   --compress            Generate artipod.tar.zst after build
+  --copy-content        Copy markdown files to artipod for grep-based search
 
 QUERY OPTIONS:
   --db <path>           Path to artipod directory (default: ./artipod)
@@ -132,7 +133,7 @@ EXAMPLES:
 async function main(): Promise<void> {
   const args = minimist(process.argv.slice(2), {
     string: ['root', 'content', 'out', 'filter', 'embedding-model', 'db', 'hybrid'],
-    boolean: ['clean', 'incremental', 'include-drafts', 'compress', 'help', 'version', 'pull'],
+    boolean: ['clean', 'incremental', 'include-drafts', 'compress', 'help', 'version', 'pull', 'copy-content'],
     default: {
       content: 'content',
       // embedding-model and embedding-dim intentionally omitted for auto-detection
@@ -318,6 +319,9 @@ async function main(): Promise<void> {
           logger.info(`  Filters: ${JSON.stringify(filters)}`);
         }
         logger.info(`  Embedder: ${embeddingModel} (${embeddingDim} dim)`);
+        if (args['copy-content']) {
+          logger.info(`  Copy content: enabled (for grep search)`);
+        }
 
         const result = await buildIndex({
           root,
@@ -331,6 +335,7 @@ async function main(): Promise<void> {
           maxTokens: config.chunking?.maxTokens || args['max-tokens'],
           overlap: config.chunking?.overlap || args.overlap,
           compress: args.compress,
+          copyContent: args['copy-content'],
           config
         });
 

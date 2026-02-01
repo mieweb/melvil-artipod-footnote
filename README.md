@@ -43,12 +43,13 @@ npm run docidx -- build --embedding-model text-embedding-3-small
 - `--clean` - Remove existing index and rebuild from scratch
 - `--incremental` - Only process changed files
 - `--include-drafts` - Include draft documents
-- `--brand <eh|wc|both>` - Filter content by brand (default: both)
+- `--filter <name=value>` - Content filter (e.g., `--filter brand=eh`)
 - `--embedding-model <model>` - Embedding model (auto-detected, see below)
 - `--embedding-dim <n>` - Embedding dimensions (auto-detected based on model)
 - `--pull` - Automatically pull Ollama model if not installed
 - `--max-tokens <n>` - Max tokens per chunk (default: 500)
 - `--overlap <n>` - Token overlap between chunks (default: 80)
+- `--copy-content` - Copy markdown files to artipod for grep-based search
 
 **Auto-detection behavior:**
 - **Hugo root**: Walks up from current directory looking for `content/`
@@ -83,6 +84,89 @@ Option 2 - Auto-pull with `--pull` flag:
 ```bash
 npm run docidx -- query --hybrid "patient registration" --k 5
 ```
+
+### Interactive Search Testing
+
+Test different search modes interactively:
+
+```bash
+./docidx.sh test --mode fts "FHIR API"
+./docidx.sh test --mode hybrid "how do I schedule"
+./docidx.sh test --mode literal "ADT^A04"
+./docidx.sh test --mode grep "copyright"   # requires --copy-content
+```
+
+### AI Agent Search
+
+Ask questions with an agentic RAG assistant:
+
+```bash
+./docidx.sh ask "How do I schedule an appointment?"
+./docidx.sh ask -v "What is FHIR?"          # verbose: show tool calls
+./docidx.sh ask -c "terms of use"           # show full chunk content
+```
+
+The agent has access to these tools:
+- `search_hybrid` - Vector + keyword search (best for natural language)
+- `search_fts` - Full-text BM25 search (best for technical terms)
+- `search_literal` - Exact substring match (finds special chars like `^`, `|`)
+- `search_grep` - Unix grep on raw files (if `--copy-content` enabled)
+- `read_document` - Read full document content
+- `find_related` - Find documents that link to a given document
+
+## Search Performance Comparison
+
+Benchmarked on ~1000 markdown documents (~10K chunks) on macOS:
+
+| Search Mode | Time | Description |
+|-------------|------|-------------|
+| **FTS** | ~6ms | SQLite FTS5 with BM25 ranking |
+| **Hybrid** | ~50ms | Vector + FTS combined (includes embedding) |
+| **Literal** | ~120ms | Exact substring match via SQL LIKE |
+| **Grep** | ~220ms | Unix grep on raw files |
+
+### Example: Search for "copyright"
+
+**FTS (SQLite) - 6ms:**
+```
+1. [7.71] Terms of Use > General Prohibitions
+   /resources/.../terms-of-use/
+   "...infringe any copyright, trademark rights..."
+
+2. [6.86] Terms of API Use > User Content
+   /resources/.../terms-of-api-use/
+   "...may constitute copyright or HIPAA infringement..."
+```
+
+**Grep - 219ms:**
+```
+1. [5 matches] terms-of-api-use
+   L43: Remember, it's not your content...
+   L145: ...infringe any copyright, trademark...
+   
+2. [5 matches] terms-of-use
+   L43: Remember, it's not your content...
+```
+
+### Key Differences
+
+| Feature | SQLite FTS/Hybrid | Grep |
+|---------|-------------------|------|
+| Speed | ~36x faster | Slower (reads all files) |
+| Ranking | BM25 relevance scores | Match count only |
+| Results | Chunk-level with context | Line-level |
+| Special chars | Tokenized (use `literal` mode) | Native support |
+| Setup | Requires index build | No setup needed |
+
+### Enabling Grep Search
+
+To enable grep-based search (for comparison or fallback):
+
+```bash
+./docidx.sh build --copy-content
+```
+
+This copies markdown files to `artipod/content/` (~3MB for 1000 docs).
 
 ## Environment Variables
 

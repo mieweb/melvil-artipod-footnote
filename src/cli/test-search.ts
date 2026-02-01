@@ -8,15 +8,15 @@
 import * as readline from 'readline';
 import * as path from 'path';
 import * as fs from 'fs';
+import { execSync } from 'child_process';
 import minimist from 'minimist';
 
 import { createEmbedder, Embedder } from '../embedder/embedder.js';
 import { SqliteStore } from '../storage/sqlite.js';
 import { readManifest } from '../storage/manifest.js';
+import { loadProjectConfig, resolveContentRoot } from '../config/index.js';
 
-const DEFAULT_ARTIPOD_DIR = './artipod';
-
-type SearchMode = 'hybrid' | 'vector' | 'fts' | 'literal';
+type SearchMode = 'hybrid' | 'vector' | 'fts' | 'literal' | 'grep';
 
 /**
  * Run a search query and display results
@@ -25,7 +25,8 @@ async function runSearch(
   query: string, 
   mode: SearchMode, 
   embedder: Embedder, 
-  store: SqliteStore
+  store: SqliteStore,
+  artipodDir: string
 ): Promise<void> {
   let results: Array<{
     chunk_id: string;
@@ -41,7 +42,64 @@ async function runSearch(
   let embedTime = 0;
   let searchTime = 0;
 
-  if (mode === 'literal') {
+  if (mode === 'grep') {
+    // Grep search on raw files
+    const contentDir = path.join(artipodDir, 'content');
+    if (!fs.existsSync(contentDir)) {
+      console.log('\n❌ Content files not found. Rebuild with --copy-content to enable grep search.\n');
+      return;
+    }
+
+    const startSearch = performance.now();
+    try {
+      const escapedQuery = query.replace(/['"\\]/g, '\\$&');
+      const grepCmd = `grep -rin --include="*.md" "${escapedQuery}" "${contentDir}" | head -100`;
+      const output = execSync(grepCmd, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+      searchTime = Math.round(performance.now() - startSearch);
+
+      // Parse and group by file
+      const lines = output.trim().split('\n').filter(l => l.length > 0);
+      const fileMatches = new Map<string, { line: number; content: string }[]>();
+      
+      for (const line of lines) {
+        const match = line.match(/^(.+?):(\d+):(.*)$/);
+        if (match) {
+          const [, filePath, lineNum, content] = match;
+          const relPath = filePath.replace(contentDir + '/', '');
+          if (!fileMatches.has(relPath)) {
+            fileMatches.set(relPath, []);
+          }
+          fileMatches.get(relPath)!.push({ line: parseInt(lineNum), content: content.trim().slice(0, 200) });
+        }
+      }
+
+      console.log(`\n📊 Grep: ${lines.length} matches in ${fileMatches.size} files (${searchTime}ms)\n`);
+
+      let rank = 0;
+      for (const [relPath, matches] of fileMatches.entries()) {
+        if (rank >= 10) break;
+        rank++;
+        const url = '/' + relPath.replace(/\.md$/, '/').replace(/\/_index\//, '/');
+        const title = path.basename(relPath, '.md').replace(/-/g, ' ');
+        
+        console.log(`${rank}. [${matches.length} matches] ${title}`);
+        console.log(`   📁 ${url}`);
+        for (const m of matches.slice(0, 3)) {
+          console.log(`   L${m.line}: ${m.content.slice(0, 100)}${m.content.length > 100 ? '...' : ''}`);
+        }
+        console.log('');
+      }
+      return;
+    } catch (error) {
+      searchTime = Math.round(performance.now() - startSearch);
+      if ((error as any).status === 1) {
+        console.log(`\n📊 Grep: 0 matches (${searchTime}ms)\n`);
+        console.log('   No results found.\n');
+        return;
+      }
+      throw error;
+    }
+  } else if (mode === 'literal') {
     // Literal substring search - finds exact characters like ^ | etc.
     const startSearch = Date.now();
     const literalResults = store.literalSearch(query, 10);
@@ -134,8 +192,8 @@ async function runSearch(
 const args = minimist(process.argv.slice(2), {
   string: ['db', 'mode', 'query', 'q'],
   default: {
-    db: DEFAULT_ARTIPOD_DIR,
-    mode: 'hybrid'  // hybrid, vector, fts, literal
+    db: '',  // Empty = auto-detect
+    mode: 'hybrid'  // hybrid, vector, fts, literal, grep
   }
 });
 
@@ -143,7 +201,20 @@ const args = minimist(process.argv.slice(2), {
 const cliQuery = args.query || args.q || args._[0] || null;
 
 async function main(): Promise<void> {
-  const artipodDir = path.resolve(args.db);
+  // Auto-detect artipod directory from project config if not specified
+  let artipodDir = args.db;
+  if (!artipodDir) {
+    const { config } = await loadProjectConfig(process.cwd());
+    const projectRoot = resolveContentRoot(config, process.cwd());
+    artipodDir = path.join(projectRoot, 'artipod');
+    
+    // Fallback to current directory
+    if (!fs.existsSync(artipodDir)) {
+      artipodDir = './artipod';
+    }
+  }
+  
+  artipodDir = path.resolve(artipodDir);
   const indexPath = path.join(artipodDir, 'index.sqlite');
   const manifestPath = path.join(artipodDir, 'manifest.json');
 
@@ -169,8 +240,8 @@ async function main(): Promise<void> {
   const embeddingDim = manifest.embedding.dimension;
   const mode = args.mode as SearchMode;
 
-  if (!['hybrid', 'vector', 'fts', 'literal'].includes(mode)) {
-    console.error(`❌ Invalid mode: ${mode}. Use: hybrid, vector, fts, or literal`);
+  if (!['hybrid', 'vector', 'fts', 'literal', 'grep'].includes(mode)) {
+    console.error(`❌ Invalid mode: ${mode}. Use: hybrid, vector, fts, literal, or grep`);
     process.exit(1);
   }
 
@@ -190,7 +261,7 @@ async function main(): Promise<void> {
   // If query provided on command line, run once and exit
   if (cliQuery) {
     console.log(`\n🔍 Search: "${cliQuery}" (mode: ${mode.toUpperCase()})`);
-    await runSearch(cliQuery, mode, embedder, store);
+    await runSearch(cliQuery, mode, embedder, store, artipodDir);
     store.close();
     process.exit(0);
   }
@@ -199,6 +270,12 @@ async function main(): Promise<void> {
   console.log(`\n🔍 Interactive Search Test`);
   console.log(`   Index: ${indexPath}`);
   console.log(`   Mode: ${mode.toUpperCase()}`);
+  
+  // Check if grep is available
+  const contentDir = path.join(artipodDir, 'content');
+  if (fs.existsSync(contentDir)) {
+    console.log(`   Grep: available (${contentDir})`);
+  }
   console.log(`   Embedder: ${embeddingModel} (${embeddingDim} dim)`);
   console.log(`   Docs: ${manifest.doc_count}, Chunks: ${manifest.chunk_count}`);
   console.log(`\n   Type a query and press Enter. Type 'quit' or Ctrl+C to exit.`);
@@ -227,7 +304,7 @@ async function main(): Promise<void> {
       }
 
       try {
-        await runSearch(query, mode, embedder, store);
+        await runSearch(query, mode, embedder, store, artipodDir);
         console.log('─'.repeat(60) + '\n');
       } catch (error) {
         console.error(`\n❌ Search error: ${error instanceof Error ? error.message : error}\n`);

@@ -34,6 +34,10 @@ export interface ManifestData {
   doc_count: number;
   chunk_count: number;
   filters?: Record<string, string>;  // Active filters (e.g., { brand: 'eh' })
+  content_copy?: {
+    enabled: boolean;
+    path: string;  // Relative path within artipod (e.g., 'content')
+  };
   agent?: AgentConfig;
 }
 
@@ -86,6 +90,7 @@ export function generateManifest(options: {
   docCount: number;
   chunkCount: number;
   filters?: Record<string, string>;
+  contentCopy?: boolean;  // Whether content files were copied
   systemPrompt?: string;
   agentModel?: string;
   agentMaxIterations?: number;
@@ -110,6 +115,10 @@ export function generateManifest(options: {
     doc_count: options.docCount,
     chunk_count: options.chunkCount,
     filters: options.filters,
+    content_copy: options.contentCopy ? {
+      enabled: true,
+      path: 'content'
+    } : undefined,
     agent: {
       system_prompt: options.systemPrompt || DEFAULT_SYSTEM_PROMPT,
       model: options.agentModel,
