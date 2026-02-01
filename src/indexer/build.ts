@@ -13,6 +13,7 @@ import { parseFrontMatter, parseMarkdown } from '../parser/hugo.js';
 import { processShortcodes, shouldIncludeDocument } from '../parser/transform.js';
 import { chunkDocument, hashContent, type Chunk } from '../chunker/chunker.js';
 import { createEmbedder, type Embedder } from '../embedder/embedder.js';
+import { createEmbeddingCache, type EmbeddingCache } from '../embedder/cache.js';
 import { SqliteStore, type ChunkRecord } from '../storage/sqlite.js';
 import { generateManifest, writeManifest } from '../storage/manifest.js';
 import { generateDocId, generateChunkId, generateUrl, extractSection } from '../utils/ids.js';
@@ -124,6 +125,9 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
     model: options.embeddingModel,
     dimension: options.embeddingDim
   });
+  
+  // Initialize embedding cache in the artipod directory
+  const embeddingCache = createEmbeddingCache(artipodDir, embedder.modelId);
 
   try {
     // Check for dimension mismatch
@@ -182,6 +186,7 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
     // Process files one at a time - embed and store immediately for crash recovery
     let totalChunks = 0;
     let embeddingsGenerated = 0;
+    let embeddingsCached = 0;
     let skippedDrafts = 0;
     const startTime = Date.now();
     let lastLogTime = startTime;
@@ -260,12 +265,43 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
         };
       });
 
-      // Generate embeddings for this file's chunks
-      const texts = chunkRecords.map(c => c.content);
-      const embeddings = await embedder.embed(texts);
+      // Generate embeddings for this file's chunks, using cache where possible
+      const contentHashes = chunkRecords.map(c => c.content_hash);
+      const cachedEmbeddings = embeddingCache.getMany(contentHashes);
       
+      // Find which chunks need new embeddings
+      const uncachedIndices: number[] = [];
+      const uncachedTexts: string[] = [];
       for (let i = 0; i < chunkRecords.length; i++) {
-        chunkRecords[i].vector = embeddings[i];
+        if (!cachedEmbeddings.has(chunkRecords[i].content_hash)) {
+          uncachedIndices.push(i);
+          uncachedTexts.push(chunkRecords[i].content);
+        }
+      }
+      
+      // Generate embeddings only for uncached chunks
+      let newEmbeddings: number[][] = [];
+      if (uncachedTexts.length > 0) {
+        newEmbeddings = await embedder.embed(uncachedTexts);
+        
+        // Cache the new embeddings
+        const toCache = new Map<string, number[]>();
+        for (let i = 0; i < uncachedIndices.length; i++) {
+          const hash = chunkRecords[uncachedIndices[i]].content_hash;
+          toCache.set(hash, newEmbeddings[i]);
+        }
+        embeddingCache.setMany(toCache);
+      }
+      
+      // Assign embeddings to chunk records (cached + new)
+      let newEmbIdx = 0;
+      for (let i = 0; i < chunkRecords.length; i++) {
+        const cached = cachedEmbeddings.get(chunkRecords[i].content_hash);
+        if (cached) {
+          chunkRecords[i].vector = cached;
+        } else {
+          chunkRecords[i].vector = newEmbeddings[newEmbIdx++];
+        }
       }
 
       // Insert chunks into database immediately
@@ -281,7 +317,8 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
       });
 
       totalChunks += chunkRecords.length;
-      embeddingsGenerated += embeddings.length;
+      embeddingsGenerated += newEmbeddings.length;
+      embeddingsCached += cachedEmbeddings.size;
 
       // Progress reporting with ETA
       const now = Date.now();
@@ -311,8 +348,9 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
     }
 
     const totalSec = (Date.now() - startTime) / 1000;
-    if (embeddingsGenerated > 0) {
-      logger.info(`Completed ${embeddingsGenerated} embeddings in ${totalSec.toFixed(1)}s (${(embeddingsGenerated / totalSec).toFixed(1)}/sec)`);
+    if (embeddingsGenerated > 0 || embeddingsCached > 0) {
+      const cacheInfo = embeddingsCached > 0 ? ` (${embeddingsCached} cached)` : '';
+      logger.info(`Completed ${embeddingsGenerated} embeddings${cacheInfo} in ${totalSec.toFixed(1)}s (${(embeddingsGenerated / totalSec).toFixed(1)}/sec)`);
     }
 
     // Get final counts

@@ -179,10 +179,27 @@ See [ARTIPOD-README.md](ARTIPOD-README.md) for the full specification.
 
 ```
 artipod/
-├── index.sqlite       # SQLite database (vectors + FTS)
-├── manifest.json      # Build metadata and configuration
-└── content/           # (optional) Raw markdown for grep search
+├── index.sqlite           # SQLite database (vectors + FTS)
+├── manifest.json          # Build metadata and configuration
+├── .embed-{model}/        # Embedding cache (e.g., .embed-nomic-embed-text)
+│   └── {hash[0:2]}/       # Subdirectories by 2-char hash prefix
+│       └── {hash[2:]}.bin # Binary Float32 embedding vectors
+└── content/               # (optional) Raw markdown for grep search
 ```
+
+### Embedding Cache
+
+The `.embed-{model}` folder caches embeddings by content hash to avoid re-vectorizing unchanged chunks across builds. This provides significant speedups for incremental builds where only a few documents change.
+
+- **Location**: `{artipod}/.embed-{model}` (e.g., `.embed-nomic-embed-text`)
+- **Format**: Binary Float32Array files (~3KB per 768-dim embedding)
+- **Organization**: Files are stored in subdirectories by 2-char hash prefix (e.g., `ab/cdef1234.bin`) to avoid slow directory listings when cache contains tens of thousands of entries
+- **Benefits**: 
+  - Rebuilds with unchanged content are nearly instant (only metadata updates)
+  - Switching between clean/incremental builds reuses cached embeddings
+  - Cache persists even if the SQLite database is deleted
+
+The cache is model-specific, so switching embedding models creates a new cache folder.
 
 ### index.sqlite Schema
 
