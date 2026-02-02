@@ -1,5 +1,5 @@
 # FOOTNOTE and Melvil
-![Melvil Web UI](docs/screenshot.png)
+<img src="docs/screenshot.png" alt="Melvil Web UI" width="500">
 
 ## What is FOOTNOTE?
 
