@@ -64,6 +64,9 @@ export interface DocidxConfig {
   /** Project name (used in manifest) */
   name?: string;
   
+  /** Base URL for document links (e.g., 'https://docs.enterprisehealth.com/') */
+  baseUrl?: string;
+  
   /** Content source configuration */
   content?: {
     /** Root directory (default: auto-detect) */

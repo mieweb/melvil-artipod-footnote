@@ -361,6 +361,7 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
     const manifest = generateManifest({
       projectName: options.config.name,
       contentRoot: options.content,
+      baseUrl: options.config.baseUrl,
       maxTokens: options.maxTokens,
       overlap: options.overlap,
       embeddingModel: options.embeddingModel,

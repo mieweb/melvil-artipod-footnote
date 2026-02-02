@@ -253,31 +253,18 @@ button:disabled {
 }
 
 .ref-item {
-  padding: 8px 0;
-  border-bottom: 1px solid #f0f0f0;
-  font-size: 0.9em;
+  padding: 4px 0;
+  font-size: 0.8em;
+  line-height: 1.4;
 }
 
-.ref-item:last-child {
-  border-bottom: none;
-}
-
-.ref-item a {
+.ref-link {
   color: #007bff;
   text-decoration: none;
 }
 
-.ref-item a:hover {
+.ref-link:hover {
   text-decoration: underline;
-}
-
-.ref-title {
-  font-weight: 500;
-}
-
-.ref-path {
-  color: #666;
-  font-size: 0.85em;
 }
 
 /* Highlight reference when targeted via citation link */
@@ -310,4 +297,55 @@ code {
   border-radius: 3px;
   font-family: 'SF Mono', Monaco, 'Courier New', monospace;
   font-size: 0.9em;
+}
+
+/* Debug timestamp footer */
+.debug-timestamp {
+  font-size: 0.75em;
+  color: #999;
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+}
+
+/* Report prompt text */
+.report-prompt {
+  font-size: 0.8em;
+  color: #999;
+}
+
+/* Answer footer with debug info and report button */
+.answer-footer {
+  margin-top: 20px;
+  padding-top: 10px;
+  border-top: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Report bad outcome button */
+.report-btn {
+  background: transparent;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.85em;
+  cursor: pointer;
+  color: #999;
+  transition: all 0.2s;
+}
+
+.report-btn:hover {
+  background: #fff3f3;
+  border-color: #dc3545;
+  color: #dc3545;
+}
+
+.report-btn:disabled {
+  cursor: default;
+}
+
+.report-btn.reported {
+  background: #f8f9fa;
+  border-color: #28a745;
+  color: #28a745;
 }

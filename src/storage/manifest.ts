@@ -20,6 +20,7 @@ export interface ManifestData {
   build_time_utc: string;
   source_git_commit: string | null;
   content_root: string;
+  base_url?: string;  // Base URL for document links (e.g., 'https://docs.enterprisehealth.com/')
   chunking: {
     max_tokens: number;
     overlap: number;
@@ -88,6 +89,7 @@ After gathering enough information, synthesize a clear answer with citations lik
 export function generateManifest(options: {
   projectName?: string;
   contentRoot: string;
+  baseUrl?: string;  // Base URL for document links
   maxTokens: number;
   overlap: number;
   embeddingModel: string;
@@ -106,6 +108,7 @@ export function generateManifest(options: {
     build_time_utc: new Date().toISOString(),
     source_git_commit: getGitCommit(options.contentRoot),
     content_root: options.contentRoot,
+    base_url: options.baseUrl,
     chunking: {
       max_tokens: options.maxTokens,
       overlap: options.overlap,

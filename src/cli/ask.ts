@@ -13,6 +13,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as readline from 'readline';
 import * as http from 'http';
+import * as crypto from 'crypto';
 import { execSync } from 'child_process';
 import minimist from 'minimist';
 
@@ -37,6 +38,60 @@ const args = minimist(process.argv.slice(2), {
 });
 
 const cliQuery = args._[0] || null;
+
+// Debug file cleanup configuration
+const DEBUG_CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const DEBUG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
+
+/**
+ * Clean up old debug files to prevent unbounded growth.
+ * Deletes files older than DEBUG_MAX_AGE_MS (1 week).
+ */
+function cleanupDebugFiles(debugDir: string, verbose: boolean = false): void {
+  if (!fs.existsSync(debugDir)) return;
+  
+  const now = Date.now();
+  let deletedCount = 0;
+  
+  try {
+    const files = fs.readdirSync(debugDir);
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      
+      // Skip reported files - they are preserved indefinitely
+      if (file.startsWith('reported-')) continue;
+      
+      const filepath = path.join(debugDir, file);
+      const stat = fs.statSync(filepath);
+      const age = now - stat.mtimeMs;
+      
+      if (age > DEBUG_MAX_AGE_MS) {
+        fs.unlinkSync(filepath);
+        deletedCount++;
+      }
+    }
+    
+    if (verbose && deletedCount > 0) {
+      console.log(`[${new Date().toISOString()}] 🧹 Cleaned up ${deletedCount} debug file(s) older than 1 week`);
+    }
+  } catch (err) {
+    // Ignore cleanup errors - non-critical
+    if (verbose) {
+      console.error(`[${new Date().toISOString()}] ⚠️ Debug cleanup error:`, err);
+    }
+  }
+}
+
+/**
+ * Start periodic debug file cleanup timer
+ */
+function startDebugCleanupTimer(debugDir: string, verbose: boolean = false): NodeJS.Timeout {
+  // Run cleanup immediately on startup
+  cleanupDebugFiles(debugDir, verbose);
+  
+  // Then run every DEBUG_CLEANUP_INTERVAL_MS (10 minutes)
+  return setInterval(() => cleanupDebugFiles(debugDir, verbose), DEBUG_CLEANUP_INTERVAL_MS);
+}
 
 
 /**
@@ -160,6 +215,102 @@ function buildSystemPrompt(manifest: ManifestData): string {
   return basePrompt + FINAL_ANSWER_DIRECTIVE;
 }
 
+/**
+ * Perform a pre-search to provide immediate context about relevant documents.
+ * This grounds the LLM before it starts reasoning and reduces hallucination.
+ * Returns a context string to append to the user's question.
+ */
+async function buildPreSearchContext(
+  question: string,
+  ctx: AgentContext,
+  limit: number = 5
+): Promise<{ context: string; results: SearchResult[]; searchQuery: string }> {
+  const ts = () => new Date().toISOString();
+  
+  // Extract key terms from question for search
+  // Remove common question words/phrases and get substantive terms
+  const searchQuery = question
+    .replace(/^(what\s+is|what\s+are|how\s+do|how\s+to|how\s+can|tell\s+me\s+about|explain|describe|what|how|why|when|where|who|is|are|do|does|can|could|would|should)\s+(an?\s+)?/gi, '')
+    .replace(/[?!.,;:'"]/g, '')
+    .trim()
+    .slice(0, 100);  // Limit length
+
+  if (!searchQuery || searchQuery.length < 2) {
+    if (ctx.verbose) {
+      console.log(`[${ts()}]    ⚠️ Pre-search skipped: query too short ("${searchQuery}")`);
+    }
+    return { context: '', results: [], searchQuery };
+  }
+
+  if (ctx.verbose) {
+    console.log(`[${ts()}]    🔍 Pre-search query: "${searchQuery}"`);
+  }
+
+  try {
+    // Use hybrid search for best results
+    const [queryVector] = await ctx.embedder.embed([searchQuery]);
+    const hybridResults = ctx.store.hybridSearch(queryVector, searchQuery, limit);
+    
+    if (hybridResults.length === 0) {
+      if (ctx.verbose) {
+        console.log(`[${ts()}]    ⚠️ Pre-search: no results found`);
+      }
+      return { context: '', results: [], searchQuery };
+    }
+
+    // Convert to SearchResult format and add to context
+    const results: SearchResult[] = hybridResults.map(r => ({
+      chunk_id: r.chunk_id,
+      doc_id: r.doc_id,
+      url: r.url,
+      title: r.title,
+      headings: r.headings,
+      content: r.content,
+      score: r.score,
+      method: 'hybrid' as const,
+      vectorRank: r.vectorRank,
+      ftsRank: r.ftsRank
+    }));
+
+    // Add to context tracking (so references work)
+    for (const r of results) {
+      if (!ctx.searchResults.has(r.chunk_id)) {
+        ctx.searchResults.set(r.chunk_id, r);
+        ctx.resultOrder.push(r.chunk_id);
+      }
+    }
+
+    // Build document list for context (just titles and URLs, no content previews)
+    const docList = results.map((r, i) => {
+      const globalIdx = ctx.resultOrder.indexOf(r.chunk_id) + 1;
+      const location = r.headings.length > 0
+        ? `${r.title} > ${r.headings.join(' > ')}`
+        : r.title;
+      return `[${globalIdx}] ${location}\n    URL: ${r.url}`;
+    }).join('\n\n');
+
+    const context = `\n\n---\nPre-search for "${searchQuery}" found these potentially relevant documents:\n\n${docList}\n\nUse search tools to read these documents in detail, or search for other relevant documents.`;
+
+    // Verbose: show the exact context being appended
+    if (ctx.verbose) {
+      console.log(`[${ts()}]    📋 Pre-search found ${results.length} documents`);
+      console.log(`[${ts()}]    ┌─ Context appended to prompt:`);
+      for (const line of context.split('\n')) {
+        console.log(`[${ts()}]    │ ${line}`);
+      }
+      console.log(`[${ts()}]    └─`);
+    }
+
+    return { context, results, searchQuery };
+  } catch (error) {
+    // Don't fail the whole request if pre-search fails
+    if (ctx.verbose) {
+      console.log(`[${ts()}] ⚠️ Pre-search failed: ${(error as Error).message}`);
+    }
+    return { context: '', results: [], searchQuery };
+  }
+}
+
 interface SearchResult {
   chunk_id: string;
   doc_id: string;
@@ -190,6 +341,7 @@ interface AgentContext {
   resultOrder: string[];  // Order of first appearance
   showChunks: boolean;  // Whether to display full chunk content
   artipodDir: string;  // Path to artipod directory (for grep search)
+  debugDir: string;  // Path to debug folder for conversation logs
 }
 
 /**
@@ -277,8 +429,28 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
     }
 
     case 'read_document': {
-      const docIdentifier = doc_id || query;
+      let docIdentifier = doc_id || query;
       if (!docIdentifier) return errorResult('Error: read_document requires a doc_id');
+      
+      // Resolve [N] references to actual doc_ids from search results
+      const refMatch = docIdentifier.match(/^\[(\d+)\]$/);
+      if (refMatch) {
+        const refNum = parseInt(refMatch[1]);
+        const refChunkId = ctx.resultOrder[refNum - 1];
+        if (refChunkId) {
+          const refResult = ctx.searchResults.get(refChunkId);
+          if (refResult) {
+            // Use the URL as the doc identifier (most reliable)
+            docIdentifier = refResult.url;
+            if (ctx.verbose) {
+              console.log(`   📖 Resolved [${refNum}] → ${docIdentifier}`);
+            }
+          }
+        }
+        if (docIdentifier.match(/^\[(\d+)\]$/)) {
+          return errorResult(`Reference [${refNum}] not found in search results. Use the URL or doc_id instead.`);
+        }
+      }
       
       const chunks = ctx.store.getDocumentChunks(docIdentifier);
       if (chunks.length === 0) {
@@ -331,8 +503,27 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
     }
 
     case 'find_related': {
-      const docIdentifier = doc_id || query;
+      let docIdentifier = doc_id || query;
       if (!docIdentifier) return errorResult('Error: find_related requires a doc_id');
+      
+      // Resolve [N] references to actual doc_ids from search results
+      const refMatch = docIdentifier.match(/^\[(\d+)\]$/);
+      if (refMatch) {
+        const refNum = parseInt(refMatch[1]);
+        const refChunkId = ctx.resultOrder[refNum - 1];
+        if (refChunkId) {
+          const refResult = ctx.searchResults.get(refChunkId);
+          if (refResult) {
+            docIdentifier = refResult.url;
+            if (ctx.verbose) {
+              console.log(`   📎 Resolved [${refNum}] → ${docIdentifier}`);
+            }
+          }
+        }
+        if (docIdentifier.match(/^\[(\d+)\]$/)) {
+          return errorResult(`Reference [${refNum}] not found in search results. Use the URL or doc_id instead.`);
+        }
+      }
       
       const related = ctx.store.findRelatedDocuments(docIdentifier, limit);
       if (related.length === 0) {
@@ -476,15 +667,15 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
     }
   }
 
-  // Format results for the LLM
+  // Format results for the LLM - include FULL content, not just snippets
   const formatted = results.map((r, i) => {
     const globalIdx = ctx.resultOrder.indexOf(r.chunk_id) + 1;
     const location = r.headings.length > 0
       ? `${r.title} > ${r.headings.join(' > ')}`
       : r.title;
-    const snippet = r.content.replace(/\n+/g, ' ').slice(0, 500);
-    return `[${globalIdx}] ${location}\n    URL: ${r.url}\n    ${snippet}${r.content.length > 500 ? '...' : ''}`;
-  }).join('\n\n');
+    // Include full content so LLM can actually read the documents
+    return `[${globalIdx}] ${location}\n    URL: ${r.url}\n\n${r.content}`;
+  }).join('\n\n---\n\n');
 
   // Build chunk metadata for streaming
   const chunks = results.map(r => ({
@@ -647,15 +838,118 @@ async function* chatStream(
 }
 
 /**
+ * Verbose logging helper - formats messages for display
+ */
+function logMessages(messages: Array<{ role: string; content: string }>, label: string): void {
+  const ts = () => new Date().toISOString();
+  console.log(`[${ts()}] ┌─ ${label}`);
+  for (const msg of messages) {
+    const roleIcon = msg.role === 'system' ? '⚙️' : msg.role === 'user' ? '👤' : '🤖';
+    console.log(`[${ts()}] │ ${roleIcon} [${msg.role.toUpperCase()}]`);
+    // Show content with indentation, truncate very long content
+    const lines = msg.content.split('\n');
+    const maxLines = msg.role === 'system' ? 10 : 50; // Truncate system prompt more
+    const displayLines = lines.length > maxLines ? [...lines.slice(0, maxLines), `... (${lines.length - maxLines} more lines)`] : lines;
+    for (const line of displayLines) {
+      // Truncate very long lines
+      const displayLine = line.length > 200 ? line.slice(0, 200) + '...' : line;
+      console.log(`[${ts()}] │   ${displayLine}`);
+    }
+    console.log(`[${ts()}] │`);
+  }
+  console.log(`[${ts()}] └─`);
+}
+
+function logResponse(response: string, label: string): void {
+  const ts = () => new Date().toISOString();
+  console.log(`[${ts()}] ┌─ ${label}`);
+  const lines = response.split('\n');
+  for (const line of lines) {
+    // Truncate very long lines
+    const displayLine = line.length > 200 ? line.slice(0, 200) + '...' : line;
+    console.log(`[${ts()}] │ ${displayLine}`);
+  }
+  console.log(`[${ts()}] └─`);
+}
+
+/**
  * Event types for streaming responses
  */
-type StreamEvent = 
+type StreamEvent =
+  | { type: 'start'; timestamp: string; debugFile?: string; reportToken?: string }
   | { type: 'thinking'; message: string }
   | { type: 'tool_call'; tool: string; query: string }
   | { type: 'tool_result'; tool: string; resultCount: number; chunks: Array<{ title: string; url: string; headings: string[]; snippet: string }> }
   | { type: 'token'; content: string }
   | { type: 'done'; references: ReturnType<typeof getReferencesData> }
   | { type: 'error'; message: string };
+
+/**
+ * Sanitize a string for use in a filename
+ */
+function sanitizeFilename(str: string): string {
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 50);
+}
+
+/**
+ * Save conversation history to a debug JSON file in OpenAI messages[] format
+ */
+function saveDebugConversation(
+  question: string,
+  messages: Array<{ role: string; content: string }>,
+  finalAnswer: string,
+  ctx: AgentContext,
+  debugFile: string,
+  reportToken: string
+): void {
+  try {
+    // Ensure debug directory exists
+    if (!fs.existsSync(ctx.debugDir)) {
+      fs.mkdirSync(ctx.debugDir, { recursive: true });
+    }
+    
+    // Use the provided debugFile name for consistency with emitted events
+    const filepath = path.join(ctx.debugDir, debugFile);
+    
+    // Build the debug data in OpenAI messages format
+    const debugData = {
+      metadata: {
+        question,
+        timestamp: new Date().toISOString(),
+        model: ctx.model,
+        documentsConsulted: ctx.searchResults.size,
+        artipodDir: ctx.artipodDir,
+        debugFile,
+        reportToken  // Secret token for validating report requests
+      },
+      messages: [
+        ...messages,
+        // Add the final assistant response if we have one
+        ...(finalAnswer ? [{ role: 'assistant', content: finalAnswer }] : [])
+      ],
+      references: Array.from(ctx.searchResults.values()).map((r, i) => ({
+        index: ctx.resultOrder.indexOf(r.chunk_id) + 1,
+        title: r.title,
+        url: r.url,
+        headings: r.headings,
+        chunk_id: r.chunk_id,
+        doc_id: r.doc_id
+      }))
+    };
+    
+    fs.writeFileSync(filepath, JSON.stringify(debugData, null, 2));
+    
+    if (ctx.verbose) {
+      console.log(`[${new Date().toISOString()}] 📝 Debug conversation saved to: ${filepath}`);
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] ❌ Failed to save debug conversation:`, error);
+  }
+}
 
 /**
  * Extract the final answer from a response that may contain FINAL: prefix
@@ -683,7 +977,43 @@ async function* runAgentStream(
   ctx: AgentContext,
   maxIterations: number = 5
 ): AsyncGenerator<StreamEvent, void, unknown> {
-  const systemPrompt = buildSystemPrompt(ctx.manifest);
+  // Generate session timestamp for debug correlation
+  const sessionTimestamp = new Date().toISOString();
+  
+  // Compute debug filename for conversation log
+  const sanitized = sanitizeFilename(question);
+  const debugFile = `${sessionTimestamp.replace(/[:.]/g, '-')}-${sanitized}.json`;
+  
+  // Generate a secret token for report validation - only the browser that received this can report
+  const reportToken = crypto.randomUUID();
+  
+  yield { type: 'start', timestamp: sessionTimestamp, debugFile, reportToken };
+  
+  const baseSystemPrompt = buildSystemPrompt(ctx.manifest);
+
+  // Perform pre-search to provide immediate context
+  yield { type: 'thinking', message: 'Finding relevant documents...' };
+  const { context: preSearchContext, results: preSearchResults } = await buildPreSearchContext(question, ctx);
+  
+  // Emit pre-search results if any were found
+  if (preSearchResults.length > 0) {
+    yield { 
+      type: 'tool_result', 
+      tool: 'pre-search', 
+      resultCount: preSearchResults.length,
+      chunks: preSearchResults.map(r => ({
+        title: r.title,
+        url: r.url,
+        headings: r.headings,
+        snippet: r.content.replace(/\n+/g, ' ').slice(0, 200) + (r.content.length > 200 ? '...' : '')
+      }))
+    };
+  }
+
+  // Build system prompt with pre-search context appended (user message stays clean)
+  const systemPrompt = preSearchContext 
+    ? baseSystemPrompt + preSearchContext
+    : baseSystemPrompt;
 
   const messages: Array<{ role: string; content: string }> = [
     { role: 'system', content: systemPrompt },
@@ -694,6 +1024,8 @@ async function* runAgentStream(
   let allThinking = '';
   // Track actual search iterations (not including retries for protocol compliance)
   let searchIteration = 0;
+  // Track final answer for debug logging
+  let finalAnswerForDebug = '';
 
   for (let i = 0; i < maxIterations; i++) {
     // Emit thinking status at start of first iteration only
@@ -701,13 +1033,20 @@ async function* runAgentStream(
       yield { type: 'thinking', message: 'Analyzing question...' };
     }
     
+    // Verbose: log what we're sending to the model
+    if (ctx.verbose) {
+      logMessages(messages, `📤 SENDING TO MODEL (iteration ${i + 1})`);
+    }
+    
     let response = '';
     let foundFinal = false;
     let finalAnswerBuffer = '';
     
+    // Can we stream tokens? Only if we already have search results (won't need retry)
+    const canStreamTokens = ctx.searchResults.size > 0;
+    
     try {
-      // Stream the LLM response, buffering until complete
-      // We DON'T stream tokens yet - we need to check if we should force a retry first
+      // Stream the LLM response
       const stream = chatStream(messages, ctx.model);
       for await (const token of stream) {
         response += token;
@@ -724,10 +1063,16 @@ async function* runAgentStream(
           // Extract what we have so far after FINAL:
           const afterFinal = response.slice(finalIdx).replace(/^\s*FINAL:\s*/i, '');
           finalAnswerBuffer = afterFinal;
-          // DON'T stream yet - wait until we verify we won't retry
+          // Stream immediately if we have search results
+          if (canStreamTokens && afterFinal) {
+            yield { type: 'token', content: afterFinal };
+          }
         } else if (foundFinal) {
-          // Accumulate the answer but don't stream yet
           finalAnswerBuffer += token;
+          // Stream tokens in real-time if we have search results
+          if (canStreamTokens) {
+            yield { type: 'token', content: token };
+          }
         }
         // If not found yet, we're accumulating (don't stream - it's thinking or tool call)
       }
@@ -739,14 +1084,15 @@ async function* runAgentStream(
       throw error;
     }
 
+    // Verbose: log what we received from the model
+    if (ctx.verbose) {
+      logResponse(response, `📥 RECEIVED FROM MODEL (iteration ${i + 1})`);
+    }
+
     // If we found FINAL: but haven't searched yet, force a retry (up to 2 attempts)
     if (foundFinal && ctx.searchResults.size === 0 && i < 2) {
       if (ctx.verbose) {
         console.log(`[${new Date().toISOString()}] ⚠️ LLM tried to answer without searching - forcing retry (attempt ${i + 1})`);
-        console.log(`[${new Date().toISOString()}]    LLM response was:`);
-        // Show truncated response for debugging
-        const truncated = response.length > 500 ? response.slice(0, 500) + '...' : response;
-        truncated.split('\n').forEach(line => console.log(`[${new Date().toISOString()}]    | ${line}`));
       }
       // Add a more forceful protocol repair prompt
       messages.push({ role: 'assistant', content: response });
@@ -768,9 +1114,6 @@ Do not include any other text. Just the tool call.`
       if (ctx.searchResults.size === 0) {
         if (ctx.verbose) {
           console.log(`[${new Date().toISOString()}] ⚠️ LLM refused to search - performing forced search`);
-          console.log(`[${new Date().toISOString()}]    LLM final response was:`);
-          const truncated = response.length > 500 ? response.slice(0, 500) + '...' : response;
-          truncated.split('\n').forEach(line => console.log(`[${new Date().toISOString()}]    | ${line}`));
         }
         // Extract likely search terms from the question
         const searchQuery = question.replace(/^(what|how|why|when|where|who|is|are|do|does|can|could|would|should)\s+/i, '').slice(0, 50);
@@ -779,10 +1122,14 @@ Do not include any other text. Just the tool call.`
         const result = await executeTool({ tool: 'search_hybrid', query: searchQuery, limit: 5 }, ctx);
         yield { type: 'tool_result', tool: 'search_hybrid', resultCount: result.chunks.length, chunks: result.chunks };
       }
-      // NOW emit the buffered answer (after we've verified no retry needed)
-      if (finalAnswerBuffer) {
+      // Emit the buffered answer only if we didn't stream it already
+      if (finalAnswerBuffer && !canStreamTokens) {
+        finalAnswerForDebug = finalAnswerBuffer;
         yield { type: 'token', content: finalAnswerBuffer };
+      } else if (finalAnswerBuffer) {
+        finalAnswerForDebug = finalAnswerBuffer;
       }
+      saveDebugConversation(question, messages, finalAnswerForDebug, ctx, debugFile, reportToken);
       yield { type: 'done', references: getReferencesData(ctx) };
       return;
     }
@@ -814,8 +1161,10 @@ Do not include any other text. Just the tool call.`
       // Not first iteration - treat entire response as answer (fallback)
       const answer = cleanResponse(extractAnswer(response));
       if (answer) {
+        finalAnswerForDebug = answer;
         yield { type: 'token', content: answer };
       }
+      saveDebugConversation(question, messages, finalAnswerForDebug, ctx, debugFile, reportToken);
       yield { type: 'done', references: getReferencesData(ctx) };
       return;
     }
@@ -841,7 +1190,13 @@ Do not include any other text. Just the tool call.`
 
     // Add assistant response and tool results to conversation
     messages.push({ role: 'assistant', content: response });
-    messages.push({ role: 'user', content: `Tool results:\n\n${toolResults.join('\n\n---\n\n')}\n\nBased on these results, provide your final answer. Remember to prefix it with FINAL:` });
+    const toolResultsMessage = `Tool results:\n\n${toolResults.join('\n\n---\n\n')}`;
+    messages.push({ role: 'user', content: toolResultsMessage });
+    
+    // Verbose: show tool results being added
+    if (ctx.verbose) {
+      logResponse(toolResultsMessage, '📨 TOOL RESULTS ADDED TO CONVERSATION');
+    }
   }
 
   // Iteration limit reached - try to get a final answer with what we have
@@ -878,10 +1233,16 @@ Do not include any other text. Just the tool call.`
       if (!foundFinal) {
         const answer = cleanResponse(extractAnswer(finalResponse));
         if (answer) {
+          finalAnswerForDebug = answer;
           yield { type: 'token', content: answer };
         }
+      } else {
+        // Extract final answer from response for debug
+        const afterFinal = finalResponse.replace(/^[\s\S]*?FINAL:\s*/i, '');
+        finalAnswerForDebug = afterFinal;
       }
       
+      saveDebugConversation(question, messages, finalAnswerForDebug, ctx, debugFile, reportToken);
       yield { type: 'done', references: getReferencesData(ctx) };
       return;
     } catch (error) {
@@ -893,7 +1254,9 @@ Do not include any other text. Just the tool call.`
   if (allThinking.trim()) {
     yield { type: 'thinking', message: 'Converting gathered information to answer...' };
     const fallbackAnswer = cleanResponse(allThinking);
+    finalAnswerForDebug = fallbackAnswer;
     yield { type: 'token', content: fallbackAnswer };
+    saveDebugConversation(question, messages, finalAnswerForDebug, ctx, debugFile, reportToken);
     yield { type: 'done', references: getReferencesData(ctx) };
     return;
   }
@@ -912,13 +1275,24 @@ async function runAgent(
   // Build system prompt from manifest (with {{TOOLS}} interpolation)
   const systemPrompt = buildSystemPrompt(ctx.manifest);
 
+  // Perform pre-search to provide immediate context
+  const { context: preSearchContext } = await buildPreSearchContext(question, ctx);
+  
+  // Build user message with pre-search context
+  const userMessage = preSearchContext 
+    ? question + preSearchContext
+    : question;
+
   const messages: Array<{ role: string; content: string }> = [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: question }
+    { role: 'user', content: userMessage }
   ];
 
   if (ctx.verbose) {
     console.log(`\n🤖 Agent starting...`);
+    if (preSearchContext) {
+      console.log(`   📋 Pre-search found ${ctx.searchResults.size} relevant documents`);
+    }
   }
 
   for (let i = 0; i < maxIterations; i++) {
@@ -1004,7 +1378,7 @@ Do not include any other text. Just the tool call.`
 
     // Add assistant response and tool results to conversation
     messages.push({ role: 'assistant', content: response });
-    messages.push({ role: 'user', content: `Tool results:\n\n${toolResults.join('\n\n---\n\n')}\n\nBased on these results, provide your final answer. Remember to prefix it with FINAL:` });
+    messages.push({ role: 'user', content: `Tool results:\n\n${toolResults.join('\n\n---\n\n')}` });
   }
 
   // Iteration limit reached - try to get a final answer with what we have
@@ -1202,7 +1576,8 @@ async function askQuestion(
     searchResults: new Map(),
     resultOrder: [],
     showChunks: options.showChunks || false,
-    artipodDir: app.artipodDir
+    artipodDir: app.artipodDir,
+    debugDir: path.join(app.artipodDir, 'debug')
   };
 
   const answer = await runAgent(question, ctx, app.maxIterations);
@@ -1259,7 +1634,8 @@ async function startServer(app: AppContext, port: number): Promise<void> {
         status: 'ok',
         docCount: app.manifest.doc_count,
         chunkCount: app.manifest.chunk_count,
-        model: app.agentModel
+        model: app.agentModel,
+        baseUrl: app.manifest.base_url || ''
       }));
       return;
     }
@@ -1309,18 +1685,26 @@ async function startServer(app: AppContext, port: number): Promise<void> {
           searchResults: new Map(),
           resultOrder: [],
           showChunks: false,  // Don't dump full chunks - too noisy
-          artipodDir: app.artipodDir
+          artipodDir: app.artipodDir,
+          debugDir: path.join(app.artipodDir, 'debug')
         };
 
         // Stream events with verbose logging
         let fullAnswer = '';
         let iterationNum = 0;
+        let debugFilename = '';  // Track for logging
         for await (const event of runAgentStream(question, ctx, app.maxIterations)) {
           res.write(`data: ${JSON.stringify(event)}\n\n`);
           
           // Verbose server-side logging
           if (app.verbose) {
             switch (event.type) {
+              case 'start':
+                if (event.debugFile) {
+                  debugFilename = event.debugFile;
+                  console.log(`[${ts()}] 🗂️  Debug file: ${debugFilename}`);
+                }
+                break;
               case 'thinking':
                 if (event.message.includes('iteration')) {
                   iterationNum++;
@@ -1334,7 +1718,11 @@ async function startServer(app: AppContext, port: number): Promise<void> {
                 console.log(`[${ts()}]    → ${event.tool}("${event.query}")`);
                 break;
               case 'tool_result':
-                console.log(`[${ts()}]    ← ${event.resultCount} results`);
+                if (event.tool === 'pre-search') {
+                  console.log(`[${ts()}]    📋 Pre-search found ${event.resultCount} related documents`);
+                } else {
+                  console.log(`[${ts()}]    ← ${event.resultCount} results`);
+                }
                 break;
               case 'token':
                 fullAnswer += event.content;
@@ -1419,22 +1807,117 @@ async function startServer(app: AppContext, port: number): Promise<void> {
       return;
     }
 
+    // Report endpoint - POST /report to flag bad outcomes
+    if (url.pathname === '/report' && req.method === 'POST') {
+      try {
+        const body = await new Promise<string>((resolve, reject) => {
+          let data = '';
+          req.on('data', chunk => data += chunk);
+          req.on('end', () => resolve(data));
+          req.on('error', reject);
+        });
+        const json = JSON.parse(body);
+        const { debugFile, reportToken, comment } = json;
+
+        if (!debugFile) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing debugFile' }));
+          return;
+        }
+
+        if (!reportToken) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing reportToken' }));
+          return;
+        }
+
+        const debugDir = path.join(app.artipodDir, 'debug');
+        const originalPath = path.join(debugDir, debugFile);
+
+        // Check if file exists
+        if (!fs.existsSync(originalPath)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Debug file not found' }));
+          return;
+        }
+
+        // Read existing debug data
+        const debugData = JSON.parse(fs.readFileSync(originalPath, 'utf-8'));
+
+        // Validate the report token matches - only the browser that received the answer can report
+        if (debugData.metadata?.reportToken !== reportToken) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid report token' }));
+          return;
+        }
+
+        // Add report metadata at the top of the object
+        const reportedData = {
+          reported: {
+            timestamp: new Date().toISOString(),
+            comment: comment || null,
+            reason: 'User flagged as bad outcome'
+          },
+          ...debugData
+        };
+
+        // Rename file with 'reported-' prefix
+        const reportedFilename = 'reported-' + debugFile;
+        const reportedPath = path.join(debugDir, reportedFilename);
+
+        // Write updated data to new file
+        fs.writeFileSync(reportedPath, JSON.stringify(reportedData, null, 2));
+
+        // Remove original file
+        fs.unlinkSync(originalPath);
+
+        const ts = () => new Date().toISOString();
+        console.log(`[${ts()}] 👎 Reported: ${reportedPath}`);
+        if (comment) {
+          console.log(`[${ts()}]    Comment: ${comment}`);
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          success: true, 
+          reportedFile: reportedFilename,
+          message: 'Thank you for your feedback. This helps improve the system.'
+        }));
+      } catch (error) {
+        console.error('Report error:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }));
+      }
+      return;
+    }
+
     // Not found
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found. Try GET /ask?q=question or POST /ask' }));
   });
 
+  // Start debug file cleanup timer
+  const debugDir = path.join(app.artipodDir, 'debug');
+  const cleanupTimer = startDebugCleanupTimer(debugDir, app.verbose);
+
   server.listen(port, () => {
     console.log(`\n🚀 docidx API server running at http://localhost:${port}/`);
     console.log(`   Model: ${app.agentModel}`);
     console.log(`   Index: ${app.manifest.doc_count} docs, ${app.manifest.chunk_count} chunks`);
+    console.log(`   Debug: ${debugDir} (cleanup: 10min, max age: 1 week)`);
     console.log(`\nEndpoints:`);
     console.log(`   GET  /              - Web UI`);
     console.log(`   GET  /health        - Health check`);
     console.log(`   GET  /ask?q=...     - Ask (JSON response)`);
     console.log(`   GET  /ask/stream?q= - Ask (streaming SSE)`);
     console.log(`   POST /ask           - Ask with JSON body`);
+    console.log(`   POST /report        - Report bad outcome`);
     console.log('');
+  });
+
+  // Cleanup timer on server close
+  server.on('close', () => {
+    clearInterval(cleanupTimer);
   });
 }
 
@@ -1460,7 +1943,8 @@ async function main(): Promise<void> {
         searchResults: new Map(),
         resultOrder: [],
         showChunks: args.chunks,
-        artipodDir: app.artipodDir
+        artipodDir: app.artipodDir,
+        debugDir: path.join(app.artipodDir, 'debug')
       };
 
       console.log('\n' + '─'.repeat(60));
