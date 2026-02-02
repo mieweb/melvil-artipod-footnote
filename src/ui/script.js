@@ -154,17 +154,18 @@ function renderThinkingSection(items, chunks, isOpen, isComplete = false) {
 function renderFinalOutput(answer, thinkingItems, allChunks, references) {
   // Thinking section collapsed after completion, with isComplete=true
   let html = renderThinkingSection(thinkingItems, allChunks, false, true);
-  html += formatAnswer(answer);
+  html += formatAnswer(answer, references);
   
-  // Add references
+  // Add references with IDs for citation links
   if (references && references.length > 0) {
     html += '<div class="references"><h3>📚 References</h3>';
     references.forEach((ref, i) => {
+      const refNum = i + 1;
       const path = ref.headings.length > 0 
         ? ref.title + ' > ' + ref.headings.join(' > ')
         : ref.title;
-      html += '<div class="ref-item">';
-      html += '<span class="ref-title">[' + (i + 1) + '] ' + escapeHtml(path) + '</span><br>';
+      html += '<div class="ref-item" id="ref-' + refNum + '">';
+      html += '<span class="ref-title">[' + refNum + '] ' + escapeHtml(path) + '</span><br>';
       html += '<span class="ref-path"><a href="' + ref.url + '" target="_blank">' + ref.url + '</a></span>';
       html += '</div>';
     });
@@ -180,7 +181,7 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-function formatAnswer(text) {
+function formatAnswer(text, references) {
   // Remove fenced code blocks that are tool call artifacts (```tool...```)
   const toolBlockPattern = /```tool[\s\S]*?```/gi;
   let cleaned = text.replace(toolBlockPattern, '');
@@ -199,10 +200,20 @@ function formatAnswer(text) {
     }
   }
   
+  // Remove LLM-generated reference sections (we generate our own)
+  // Match patterns like: "References:\n[1] ..." or "## References" etc.
+  cleaned = cleaned.replace(/\n+(References:?|## References|### References)[\s\S]*$/i, '');
+  
   // Strip trailing code fence
   cleaned = cleaned.replace(/\n?```\s*$/i, '');
   
   cleaned = cleaned.trim();
+  
+  // Make inline [N] citations clickable (before markdown parsing)
+  // Match [1], [2], etc. but not [text](url) markdown links
+  cleaned = cleaned.replace(/\[(\d+)\](?!\()/g, (match, num) => {
+    return '<a href="#ref-' + num + '" class="citation-link" title="Jump to reference ' + num + '">[' + num + ']</a>';
+  });
   
   // Use marked.js for markdown rendering
   if (typeof marked !== 'undefined') {

@@ -280,6 +280,26 @@ button:disabled {
   font-size: 0.85em;
 }
 
+/* Highlight reference when targeted via citation link */
+.ref-item:target {
+  background: #fff3cd;
+  border-radius: 4px;
+  padding: 8px;
+  margin: -8px;
+  box-shadow: 0 0 0 2px #ffc107;
+}
+
+/* Inline citation links */
+.citation-link {
+  color: #007bff;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.citation-link:hover {
+  text-decoration: underline;
+}
+
 .error {
   color: #dc3545;
 }

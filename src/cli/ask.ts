@@ -135,8 +135,18 @@ IMPORTANT RULES:
 - You MUST search the documentation before answering. NEVER answer without searching first.
 - NEVER mix tool calls with answer text in the same response.
 - NEVER omit the FINAL: prefix on your completed answer.
-- Citations like [1], [2] MUST reference actual search results you received.
-- If you need to search, output ONLY the tool call. If you're ready to answer, start with FINAL:`;
+- If you need to search, output ONLY the tool call. If you're ready to answer, start with FINAL:
+
+## CITATION RULES (CRITICAL)
+
+When citing sources in your answer:
+- Use ONLY the exact [N] numbers shown in search results (e.g., [1], [2], [3])
+- Do NOT invent document titles - reference by number only
+- Do NOT include any bibliography or reference list at the end - the system generates this automatically
+- Inline citations should look like: "Encounters can be created from the visit queue [1] or from the patient chart [3]."
+- WRONG: "[1] WebChart User Guide Chapter 3" - never include titles with citations
+- RIGHT: "According to the documentation [1], encounters track patient visits."
+- If search results show [1], [2], [5] - use those exact numbers, not [1], [2], [3]`;
 
 /**
  * Build the system prompt by interpolating {{TOOLS}} placeholder with actual tools definition
