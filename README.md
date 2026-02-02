@@ -1,5 +1,10 @@
 # FOOTNOTE and Melvil
+
 <img src="docs/screenshot.png" alt="Melvil Web UI" width="500">
+
+[![Watch a 3 min demo](http://img.youtube.com/vi/VIGd_Q-deLU/0.jpg)](http://www.youtube.com/watch?v=VIGd_Q-deLU "3 Min Demo of Melvil and Footnote")
+
+<a href="https://youtu.be/VIGd_Q-deLU">Watch a 3 min demo</a>
 
 ## What is FOOTNOTE?
 
