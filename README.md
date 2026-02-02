@@ -1,6 +1,31 @@
-# docidx
+# FOOTNOTE and Melvil
+![Melvil Web UI](docs/screenshot.png)
 
-Hugo content index compiler that produces portable SQLite hybrid index artipods (sqlite-vec + FTS5) for server-side RAG consumption.
+## What is FOOTNOTE?
+
+**FOOTNOTE** — *From Ozwell Only: Traceable Notes & Observations in Text Evidence*
+
+FOOTNOTE is a portable index format within [Artipods](ARTIPOD-README.md) designed for RAG (Retrieval-Augmented Generation) with proper citations. It compiles markdown documentation into a self-contained SQLite database that combines:
+
+- **sqlite-vec** for semantic vector search (find conceptually similar content)
+- **FTS5** for full-text BM25 search (find exact keywords and phrases)
+- **Literal search** for special characters and code patterns (HL7 messages like `ADT^A04`)
+
+The result is a single `index.sqlite` file that can be deployed anywhere—servers, edge functions, or even in-browser via WebAssembly.
+
+## What is Melvil?
+
+**Melvil** is an agentic RAG assistant (implemented in `ask.ts`) that uses FOOTNOTE indexes to answer questions with citations. Named after [Melvil Dewey](https://en.wikipedia.org/wiki/Melvil_Dewey), the inventor of the Dewey Decimal System, Melvil helps users find information in large documentation sets.
+
+Melvil features:
+- **Tool-based search**: The LLM decides which search strategy to use (hybrid, FTS, literal)
+- **Multi-turn reasoning**: Can search multiple times to gather comprehensive answers
+- **Citation tracking**: Every answer includes `[1]`, `[2]` references to source documents
+- **Debug & reporting**: Saves conversation logs and allows users to flag bad answers for review
+
+## Overview
+
+This tool (docidx) is a markdown compiler that produces FOOTNOTE-enabled Artipods for server-side RAG consumption. 
 
 See https://alexgarcia.xyz/sqlite-vec/wasm.html for in browser example
 
