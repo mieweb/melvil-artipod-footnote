@@ -114,6 +114,82 @@ The agent has access to these tools:
 - `read_document` - Read full document content
 - `find_related` - Find documents that link to a given document
 
+### Web Server (API POC)
+
+The ask agent includes a built-in HTTP server that demonstrates how external applications can consume an artipod. This serves as a **proof of concept** for building documentation assistants, chatbots, or search interfaces.
+
+```bash
+./docidx.sh ask --serve --port 3000              # Start server
+./docidx.sh ask --serve --port 3000 --verbose    # With request logging
+```
+
+**Endpoints:**
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Web UI for interactive Q&A |
+| `/health` | GET | Health check + stats (doc count, chunk count, model) |
+| `/ask?q=...` | GET | Ask question, returns JSON response |
+| `/ask` | POST | Ask with JSON body `{"question": "..."}` |
+| `/ask/stream?q=...` | GET | Streaming SSE response (real-time tokens) |
+
+**JSON Response Format:**
+```json
+{
+  "answer": "The patient registration process involves...",
+  "references": [
+    {
+      "index": 1,
+      "doc_id": "doc_abc123",
+      "url": "/functions/patient-registration/",
+      "title": "Patient Registration",
+      "headings": ["Manual Entry", "Required Fields"],
+      "method": "hybrid",
+      "score": 0.0241
+    }
+  ]
+}
+```
+
+**Streaming SSE Events:**
+```
+data: {"type": "thinking", "message": "Searching... (iteration 1)"}
+data: {"type": "tool_call", "tool": "search_fts", "query": "patient registration"}
+data: {"type": "token", "content": "To register"}
+data: {"type": "token", "content": " a patient..."}
+data: {"type": "done", "references": [...]}
+data: [DONE]
+```
+
+**Building Your Own Client:**
+
+The artipod is designed to be consumed by any application that can:
+1. Read SQLite (for direct search access)
+2. Call an embedding API (Ollama/OpenAI) for vector queries
+3. Optionally, wrap an LLM for agentic search
+
+See the [SqliteStore](src/storage/sqlite.ts) class for direct database access patterns, or use the HTTP API as a simpler integration point.
+
+## Prompt Customization and Guide
+### Final Answer Signaling (`FINAL:`)
+
+The `ask` command automatically injects a `FINAL:` answer-marker requirement into all agent prompts. This ensures reliable detection of when the LLM has finished responding, especially in tool-calling workflows where the model may emit multiple intermediate outputs.
+
+With this injection, the agent **must output exactly one of two things**:
+
+1. a **tool call** expressed as valid JSON only, or
+2. a **completed user-facing answer prefixed with `FINAL:`** and containing no planning, narration, or tool references.
+
+**Why `FINAL:`?** This convention avoids ambiguity in streaming and multi-turn tool workflows and is more robust than XML tags or heuristic detection. The `FINAL:` prefix is widely used in agent frameworks and has been shown in practice to be the most consistently followed boundary marker across OpenAI, Anthropic, Gemini, and Ollama-hosted models. If you provide a custom prompt via `--prompt-file`, the tool appends the `FINAL:` requirement automatically—you don't need to include it yourself.
+
+**References / rationale**:
+
+https://chatgpt.com/share/69805745-bfb8-8004-a6ba-2d69750cdc6a
+* OpenAI & Anthropic agent patterns separating *tool calls* from *final answers*
+* LangChain / LangGraph best practices for tool-calling agents
+* ReAct-style prompting (Yao et al., 2022) emphasizing explicit action vs. answer boundaries
+* Production experience across mixed-vendor LLM stacks showing higher compliance with simple textual sentinels than XML-style tags
+
 ## Search Performance Comparison
 
 Benchmarked on ~1000 markdown documents (~10K chunks) on macOS:
