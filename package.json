@@ -31,7 +31,8 @@
     "prepublishOnly": "npm run build",
     "start": "tsx src/cli/main.ts",
     "test": "node --import tsx --test src/**/*.test.ts",
-    "docidx": "tsx src/cli/main.ts"
+    "docidx": "tsx src/cli/main.ts",
+    "mcp": "tsx src/cli/mcp.ts"
   },
   "keywords": [
     "documentation",
@@ -52,18 +53,20 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/tokenizer": "^0.0.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^11.6.0",
-    "sqlite-vec": "^0.1.6",
     "js-yaml": "^4.1.0",
+    "mdast-util-to-string": "^4.0.0",
     "minimist": "^1.2.8",
     "openai": "^4.73.0",
-    "unified": "^11.0.5",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
-    "mdast-util-to-string": "^4.0.0",
+    "sqlite-vec": "^0.1.6",
+    "unified": "^11.0.5",
     "unist-util-visit": "^5.0.0",
     "winston": "^3.17.0",
-    "xxhash-wasm": "^1.1.0"
+    "xxhash-wasm": "^1.1.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
