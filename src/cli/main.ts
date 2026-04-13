@@ -79,6 +79,7 @@ USAGE:
 COMMANDS:
   build     Build or update the SQLite hybrid index from markdown content
   query     Run a test query against an existing index
+  mcp       Start an MCP (Model Context Protocol) server for AI assistants
 
 CONFIGURATION:
   docidx looks for a configuration file (docidx.config.js) in the project root.
@@ -127,6 +128,9 @@ EXAMPLES:
 
   # Test query
   docidx query --hybrid "patient registration" --k 5
+
+  # Start MCP server for AI assistants
+  docidx mcp --db ./artipod
 `);
 }
 
@@ -374,6 +378,13 @@ async function main(): Promise<void> {
           console.log(`   Chunk: ${result.chunk_id}`);
           console.log('');
         }
+        break;
+      }
+
+      case 'mcp': {
+        // MCP server is a separate entry point — import and run it
+        const { startMcpServer } = await import('./mcp.js');
+        await startMcpServer(args.db || './artipod');
         break;
       }
 

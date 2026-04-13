@@ -153,6 +153,42 @@ The ask agent includes a built-in HTTP server that demonstrates how external app
 ./docidx.sh ask --serve --port 3000 --verbose    # With request logging
 ```
 
+### MCP Server (Model Context Protocol)
+
+The MCP server exposes artipod search tools to AI assistants like VS Code Copilot, Claude Desktop, and Cursor. Unlike the HTTP server + ask agent, the MCP server provides **tools, not answers** — the client's LLM decides which tools to call and synthesizes the response.
+
+```bash
+docidx mcp --db ./artipod                        # Start MCP server (stdio)
+```
+
+**Available MCP tools:** `search_hybrid`, `search_fts`, `search_literal`, `read_document`, `find_related`, `list_documents`, `search_grep` (if `--copy-content` was used at build time), `build_index` (incremental update), `rebuild_index` (clean rebuild).
+
+**VS Code configuration** (`.vscode/settings.json` or user settings):
+```json
+{
+  "mcp": {
+    "servers": {
+      "docidx": {
+        "command": "npx",
+        "args": ["docidx", "mcp", "--db", "/path/to/artipod"]
+      }
+    }
+  }
+}
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "docidx": {
+      "command": "npx",
+      "args": ["docidx", "mcp", "--db", "/path/to/artipod"]
+    }
+  }
+}
+```
+
 **Endpoints:**
 
 | Endpoint | Method | Description |
