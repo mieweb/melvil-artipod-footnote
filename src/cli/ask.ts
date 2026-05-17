@@ -2016,6 +2016,46 @@ async function startServer(app: AppContext, port: number): Promise<void> {
       return;
     }
 
+    // File download: serve original source file by its relative path
+    if (url.pathname.startsWith('/file/') && req.method === 'GET') {
+      const relPath = decodeURIComponent(url.pathname.slice('/file/'.length));
+      const contentRoot = path.dirname(path.resolve(app.footnoteDir));
+      const filePath = path.resolve(contentRoot, relPath);
+      // Prevent path traversal
+      if (!filePath.startsWith(contentRoot + path.sep) && filePath !== contentRoot) {
+        res.writeHead(403, { 'Content-Type': 'text/plain' });
+        res.end('Forbidden');
+        return;
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        '.pdf': 'application/pdf',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.txt': 'text/plain',
+        '.md': 'text/markdown',
+      };
+      // Types that browsers can display natively — serve inline
+      const inlineTypes = new Set(['.pdf', '.txt', '.md']);
+      const mime = mimeTypes[ext] ?? 'application/octet-stream';
+      try {
+        const data = fs.readFileSync(filePath);
+        const filename = encodeURIComponent(path.basename(filePath));
+        const disposition = inlineTypes.has(ext)
+          ? `inline; filename="${path.basename(filePath)}"; filename*=UTF-8''${filename}`
+          : `attachment; filename="${path.basename(filePath)}"; filename*=UTF-8''${filename}`;
+        res.writeHead(200, {
+          'Content-Type': mime,
+          'Content-Disposition': disposition,
+          'Content-Length': String(data.length),
+        });
+        res.end(data);
+      } catch {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('File not found');
+      }
+      return;
+    }
+
     // Document viewer: try to resolve any other GET path as a document URL
     if (req.method === 'GET') {
       // Normalize: decode URI encoding, strip known extensions (with optional trailing slash), ensure trailing slash
@@ -2044,6 +2084,16 @@ async function startServer(app: AppContext, port: number): Promise<void> {
         }
         const fullContent = parts.join('\n\n');
         const title = escapeHtmlServer(doc.title);
+        // Build download link for non-markdown source files
+        const srcExt = path.extname(doc.path).toLowerCase();
+        const downloadableExts = new Set(['.pdf', '.docx']);
+        const inlineExts = new Set(['.pdf']);
+        const fileUrl = `/file/${encodeURIComponent(doc.path).replace(/%2F/g, '/')}`;
+        const downloadLink = downloadableExts.has(srcExt)
+          ? (inlineExts.has(srcExt)
+            ? `<a class="download" href="${fileUrl}" target="_blank">📄 View PDF</a>`
+            : `<a class="download" href="${fileUrl}">⬇ Download ${srcExt.slice(1).toUpperCase()}</a>`)
+          : '';
         const headingsList = chunks
           .flatMap(c => c.headings.map(h => {
             const clean = stripHtml(h);
@@ -2072,6 +2122,8 @@ async function startServer(app: AppContext, port: number): Promise<void> {
     pre code { background: none; padding: 0; }
     .back { display: inline-block; margin-bottom: 20px; font-size: 0.9em; color: #666; text-decoration: none; }
     .back:hover { color: #333; }
+    .download { display: inline-block; margin-left: 16px; font-size: 0.85em; color: #0066cc; text-decoration: none; vertical-align: middle; }
+    .download:hover { text-decoration: underline; }
     .meta { font-size: 0.8em; color: #999; margin-bottom: 24px; border-bottom: 1px solid #eee; padding-bottom: 12px; }
     .toc { background: #f8f9fa; border-radius: 6px; padding: 12px 20px; margin-bottom: 24px; font-size: 0.9em; }
     .toc h2 { margin: 0 0 8px 0; font-size: 1em; color: #555; }
@@ -2083,7 +2135,7 @@ async function startServer(app: AppContext, port: number): Promise<void> {
 </head>
 <body>
   <a href="/" class="back">← Back to search</a>
-  <h1>${title}</h1>
+  <h1>${title}${downloadLink}</h1>
   <div class="meta">URL: ${escapeHtmlServer(docPath)}</div>
   ${tocHtml}
   <div class="doc-content">${rendered}</div>

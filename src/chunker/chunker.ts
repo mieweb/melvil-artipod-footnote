@@ -83,7 +83,7 @@ function packWithOverlap(
 
     // If adding this unit would exceed max tokens, finalize current chunk
     if (currentTokens + unitTokens > maxTokens && currentUnits.length > 0) {
-      const content = currentUnits.join(' ');
+      const content = currentUnits.join('\n\n');
       chunks.push({
         index: chunkIndex++,
         headingPath: [...headingPath],
@@ -116,7 +116,7 @@ function packWithOverlap(
 
   // Final chunk
   if (currentUnits.length > 0) {
-    const content = currentUnits.join(' ');
+    const content = currentUnits.join('\n\n');
     chunks.push({
       index: chunkIndex,
       headingPath: [...headingPath],
