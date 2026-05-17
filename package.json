@@ -63,6 +63,7 @@
     "minimist": "^1.2.8",
     "openai": "^4.73.0",
     "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^5.7.284",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
     "sqlite-vec": "^0.1.6",
