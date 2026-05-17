@@ -10,7 +10,12 @@ case "$1" in
     ;;
   ask)
     shift
-    exec npx tsx src/cli/ask.ts "$@"
+    # Use compiled dist/ if available (lighter than tsx); fall back to tsx for dev
+    if [ -f "$SCRIPT_DIR/dist/cli/ask.js" ]; then
+      exec node "$SCRIPT_DIR/dist/cli/ask.js" "$@"
+    else
+      exec npx tsx src/cli/ask.ts "$@"
+    fi
     ;;
   *)
     exec npx tsx src/cli/main.ts "$@"

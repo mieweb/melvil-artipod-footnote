@@ -30,6 +30,7 @@
     "build": "tsc",
     "prepublishOnly": "npm run build",
     "start": "tsx src/cli/main.ts",
+    "serve": "npm run build && node dist/cli/ask.js --serve",
     "test": "node --import tsx --test src/**/*.test.ts",
     "docidx": "tsx src/cli/main.ts",
     "mcp": "tsx src/cli/mcp.ts"
@@ -57,6 +58,7 @@
     "better-sqlite3": "^11.6.0",
     "js-yaml": "^4.1.0",
     "mammoth": "^1.12.0",
+    "marked": "^18.0.3",
     "mdast-util-to-string": "^4.0.0",
     "minimist": "^1.2.8",
     "openai": "^4.73.0",
