@@ -16,6 +16,7 @@ import * as http from 'http';
 import * as crypto from 'crypto';
 import { execSync } from 'child_process';
 import minimist from 'minimist';
+import { marked } from 'marked';
 
 import { createEmbedder, Embedder } from '../embedder/embedder.js';
 import { SqliteStore } from '../storage/sqlite.js';
@@ -1595,11 +1596,27 @@ function escapeHtmlServer(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/** Strip HTML tags from a string */
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, '').trim();
+}
+
 /** Anchor slug (mirrors client-side slugify) */
 function slugifyServer(heading: string): string {
-  return heading.toLowerCase().trim()
+  return stripHtml(heading).toLowerCase().trim()
     .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
+
+// Configure marked to use clean heading IDs (strip inline HTML like mammoth anchor tags)
+marked.use({
+  renderer: {
+    heading({ text, depth }: { text: string; depth: number }) {
+      const clean = stripHtml(text);
+      const id = slugifyServer(clean);
+      return `<h${depth} id="${id}">${clean}</h${depth}>\n`;
+    }
+  }
+});
 
 /**
  * Start HTTP server for API access
@@ -2007,28 +2024,37 @@ async function startServer(app: AppContext, port: number): Promise<void> {
       const chunks = app.store.getDocumentChunks(docPath);
       if (chunks.length > 0) {
         const doc = chunks[0];
-        const fullContent = chunks.map(c => escapeHtmlServer(c.content)).join('\n\n');
+        // Reconstruct document with headings from heading path
+        let prevPath: string[] = [];
+        const parts: string[] = [];
+        for (const chunk of chunks) {
+          const path = chunk.headings;
+          // Find where path diverges from previous (default: where prevPath ends)
+          let divergeAt = prevPath.length;
+          for (let i = 0; i < Math.min(path.length, prevPath.length); i++) {
+            if (path[i] !== prevPath[i]) { divergeAt = i; break; }
+          }
+          if (divergeAt < path.length) {
+            for (let i = divergeAt; i < path.length; i++) {
+              parts.push(`${'#'.repeat(i + 1)} ${path[i]}`);
+            }
+          }
+          prevPath = path;
+          parts.push(chunk.content);
+        }
+        const fullContent = parts.join('\n\n');
         const title = escapeHtmlServer(doc.title);
         const headingsList = chunks
-          .flatMap(c => c.headings.map(h => `<li><a href="#${slugifyServer(h)}">${escapeHtmlServer(h)}</a></li>`))
+          .flatMap(c => c.headings.map(h => {
+            const clean = stripHtml(h);
+            return `<li><a href="#${slugifyServer(clean)}">${escapeHtmlServer(clean)}</a></li>`;
+          }))
           .filter((v, i, a) => a.indexOf(v) === i)
           .join('\n');
         const tocHtml = headingsList ? `<nav class="toc"><h2>Contents</h2><ul>${headingsList}</ul></nav>` : '';
 
-        // Render content: wrap each heading line so anchors work
-        const rendered = fullContent
-          .split('\n')
-          .map(line => {
-            const hm = line.match(/^(#{1,6})\s+(.*)/);
-            if (hm) {
-              const level = hm[1].length;
-              const text = hm[2];
-              const id = slugifyServer(text);
-              return `<h${level} id="${id}">${text}</h${level}>`;
-            }
-            return line;
-          })
-          .join('\n');
+        // Render markdown content as HTML
+        const rendered = await marked.parse(fullContent, { async: true });
 
         const html = `<!DOCTYPE html>
 <html lang="en">
@@ -2060,9 +2086,7 @@ async function startServer(app: AppContext, port: number): Promise<void> {
   <h1>${title}</h1>
   <div class="meta">URL: ${escapeHtmlServer(docPath)}</div>
   ${tocHtml}
-  <div class="doc-content">
-    <pre style="white-space:pre-wrap;font-family:inherit;background:none;padding:0">${rendered}</pre>
-  </div>
+  <div class="doc-content">${rendered}</div>
 </body>
 </html>`;
         res.writeHead(200, { 'Content-Type': 'text/html' });
