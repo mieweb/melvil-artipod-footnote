@@ -1586,6 +1586,17 @@ async function askQuestion(
   return { answer, references };
 }
 
+/** Escape HTML entities for server-rendered pages */
+function escapeHtmlServer(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** Hugo-compatible anchor slug (mirrors client-side slugify) */
+function slugifyServer(heading: string): string {
+  return heading.toLowerCase().trim()
+    .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
+
 /**
  * Start HTTP server for API access
  */
@@ -1624,6 +1635,99 @@ async function startServer(app: AppContext, port: number): Promise<void> {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
         res.end(`Error loading ${staticMatch.file}`);
       }
+      return;
+    }
+
+    // Avoid browser favicon 404 noise when no icon is provided.
+    if (url.pathname === '/favicon.ico' && req.method === 'GET') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // Document tree browser
+    if (url.pathname === '/browse' && req.method === 'GET') {
+      const docs = app.store.listDocuments();
+
+      // Build a path-prefix tree so we can render folder groupings
+      type TreeNode = { title: string; url: string; children: Map<string, TreeNode> };
+      const root: TreeNode = { title: '', url: '', children: new Map() };
+
+      for (const doc of docs) {
+        const parts = doc.url.replace(/^\/|\/$|^\//g, '').split('/');
+        let node = root;
+        for (let i = 0; i < parts.length - 1; i++) {
+          const seg = parts[i];
+          if (!node.children.has(seg)) {
+            node.children.set(seg, { title: seg, url: '', children: new Map() });
+          }
+          node = node.children.get(seg)!;
+        }
+        const leaf = parts[parts.length - 1] || parts[parts.length - 2] || doc.doc_id;
+        node.children.set(doc.url, { title: doc.title, url: doc.url, children: new Map() });
+      }
+
+      function renderTree(node: TreeNode, depth: number): string {
+        let html = depth === 0 ? '<ul class="tree root">' : '<ul class="tree">';
+        for (const [, child] of node.children) {
+          if (child.url) {
+            html += `<li class="doc"><a href="${escapeHtmlServer(child.url)}">${escapeHtmlServer(child.title)}</a></li>`;
+          } else {
+            html += `<li class="folder"><span class="folder-name">${escapeHtmlServer(child.title)}/</span>${renderTree(child, depth + 1)}</li>`;
+          }
+        }
+        html += '</ul>';
+        return html;
+      }
+
+      const treeHtml = renderTree(root, 0);
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browse – Melvil FOOTNOTE</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+           max-width: 860px; margin: 0 auto; padding: 20px 24px; color: #333; }
+    a { color: #0066cc; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .back { display: inline-block; margin-bottom: 16px; font-size: 0.9em; color: #666; }
+    .back:hover { color: #333; }
+    h1 { font-size: 1.4em; margin: 0 0 4px 0; }
+    .meta { font-size: 0.8em; color: #999; margin-bottom: 20px; }
+    input[type=search] { width: 100%; padding: 8px 12px; font-size: 14px; border: 1px solid #ddd;
+                         border-radius: 6px; margin-bottom: 16px; box-sizing: border-box; }
+    ul.tree { list-style: none; margin: 0; padding-left: 18px; }
+    ul.root { padding-left: 0; }
+    li.doc { padding: 3px 0; }
+    li.folder { padding: 4px 0; }
+    .folder-name { font-weight: 600; color: #555; font-size: 0.9em; }
+    li { border-left: 1px solid #eee; padding-left: 10px; }
+    ul.root > li { border-left: none; padding-left: 0; }
+  </style>
+</head>
+<body>
+  <a href="/" class="back">← Back to search</a>
+  <h1>📂 Browse Documents</h1>
+  <div class="meta">${docs.length} documents indexed</div>
+  <input type="search" id="filter" placeholder="Filter documents…" oninput="filterTree(this.value)">
+  <div id="tree">${treeHtml}</div>
+  <script>
+    const allItems = Array.from(document.querySelectorAll('li.doc'));
+    function filterTree(q) {
+      const lq = q.toLowerCase();
+      allItems.forEach(li => {
+        li.style.display = !lq || li.textContent.toLowerCase().includes(lq) ? '' : 'none';
+      });
+    }
+    document.getElementById('filter').focus();
+  <\/script>
+</body>
+</html>`;
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(html);
       return;
     }
 
@@ -1889,6 +1993,76 @@ async function startServer(app: AppContext, port: number): Promise<void> {
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }));
       }
       return;
+    }
+
+    // Document viewer: try to resolve any other GET path as a document URL
+    if (req.method === 'GET') {
+      const docPath = url.pathname;
+      const chunks = app.store.getDocumentChunks(docPath);
+      if (chunks.length > 0) {
+        const doc = chunks[0];
+        const fullContent = chunks.map(c => escapeHtmlServer(c.content)).join('\n\n');
+        const title = escapeHtmlServer(doc.title);
+        const headingsList = chunks
+          .flatMap(c => c.headings.map(h => `<li><a href="#${slugifyServer(h)}">${escapeHtmlServer(h)}</a></li>`))
+          .filter((v, i, a) => a.indexOf(v) === i)
+          .join('\n');
+        const tocHtml = headingsList ? `<nav class="toc"><h2>Contents</h2><ul>${headingsList}</ul></nav>` : '';
+
+        // Render content: wrap each heading line so anchors work
+        const rendered = fullContent
+          .split('\n')
+          .map(line => {
+            const hm = line.match(/^(#{1,6})\s+(.*)/);
+            if (hm) {
+              const level = hm[1].length;
+              const text = hm[2];
+              const id = slugifyServer(text);
+              return `<h${level} id="${id}">${text}</h${level}>`;
+            }
+            return line;
+          })
+          .join('\n');
+
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+           max-width: 860px; margin: 0 auto; padding: 20px 24px; color: #333; line-height: 1.7; }
+    a { color: #0066cc; }
+    pre { background: #f6f8fa; padding: 12px; border-radius: 6px; overflow-x: auto; }
+    code { font-size: 0.88em; }
+    pre code { background: none; padding: 0; }
+    .back { display: inline-block; margin-bottom: 20px; font-size: 0.9em; color: #666; text-decoration: none; }
+    .back:hover { color: #333; }
+    .meta { font-size: 0.8em; color: #999; margin-bottom: 24px; border-bottom: 1px solid #eee; padding-bottom: 12px; }
+    .toc { background: #f8f9fa; border-radius: 6px; padding: 12px 20px; margin-bottom: 24px; font-size: 0.9em; }
+    .toc h2 { margin: 0 0 8px 0; font-size: 1em; color: #555; }
+    .toc ul { margin: 0; padding-left: 1.2em; }
+    .toc li { margin: 2px 0; }
+    h1,h2,h3,h4 { margin-top: 1.5em; }
+    h1:first-of-type { margin-top: 0; }
+  </style>
+</head>
+<body>
+  <a href="/" class="back">← Back to search</a>
+  <h1>${title}</h1>
+  <div class="meta">URL: ${escapeHtmlServer(docPath)}</div>
+  ${tocHtml}
+  <div class="doc-content">
+    <pre style="white-space:pre-wrap;font-family:inherit;background:none;padding:0">${rendered}</pre>
+  </div>
+</body>
+</html>`;
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(html);
+        return;
+      }
     }
 
     // Not found

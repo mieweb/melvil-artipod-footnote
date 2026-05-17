@@ -13,7 +13,7 @@ async function loadStats() {
   try {
     const response = await fetch('/health');
     const data = await response.json();
-    stats.textContent = `${data.docCount} docs, ${data.chunkCount} chunks | Model: ${data.model}`;
+    stats.innerHTML = `${data.docCount} docs, ${data.chunkCount} chunks | Model: ${data.model} | <a href="/browse">Browse</a>`;
     // Store baseUrl for constructing document links
     baseUrl = data.baseUrl || '';
   } catch (e) {

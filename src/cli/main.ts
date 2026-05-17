@@ -33,14 +33,14 @@ const logger = createLogger({
 });
 
 /**
- * Auto-detect Hugo project root by looking for content/ directory
+ * Auto-detect project root by looking for the configured content directory
  */
-function findHugoRoot(startDir: string): string | null {
+function findProjectRootByContentDir(startDir: string, contentDir: string): string | null {
   let dir = path.resolve(startDir);
   
-  // Walk up looking for a directory with content/
+  // Walk up looking for a directory with the requested content dir
   for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, 'content'))) {
+    if (fs.existsSync(path.join(dir, contentDir))) {
       return dir;
     }
     const parent = path.dirname(dir);
@@ -135,7 +135,11 @@ EXAMPLES:
 }
 
 async function main(): Promise<void> {
-  const args = minimist(process.argv.slice(2), {
+  const rawArgv = process.argv.slice(2);
+  const cliProvidedRoot = rawArgv.includes('--root') || rawArgv.includes('-r');
+  const cliProvidedContent = rawArgv.includes('--content') || rawArgv.includes('-c');
+
+  const args = minimist(rawArgv, {
     string: ['root', 'content', 'out', 'filter', 'embedding-model', 'db', 'hybrid'],
     boolean: ['clean', 'incremental', 'include-drafts', 'compress', 'help', 'version', 'pull', 'copy-content'],
     default: {
@@ -177,10 +181,20 @@ async function main(): Promise<void> {
           logger.info(`Loaded config from: ${configPath}`);
         }
 
-        // Auto-detect project root if not specified
+        // Resolve content directory with explicit CLI flags taking precedence.
+        const contentDir = cliProvidedContent
+          ? args.content
+          : (config.content?.dir || DEFAULT_CONFIG.content?.dir || args.content);
+
+        // Auto-detect project root if not specified.
         let root = args.root;
-        if (!root) {
-          root = resolveContentRoot(config, process.cwd());
+        if (!cliProvidedRoot) {
+          if (cliProvidedContent) {
+            root = findProjectRootByContentDir(process.cwd(), contentDir) || process.cwd();
+          } else {
+            root = resolveContentRoot(config, process.cwd());
+          }
+
           if (root !== process.cwd()) {
             logger.info(`Auto-detected project root: ${root}`);
           }
@@ -316,7 +330,7 @@ async function main(): Promise<void> {
 
         logger.info(`Starting index build...`);
         logger.info(`  Root: ${root}`);
-        logger.info(`  Content: ${config.content?.dir || args.content}`);
+        logger.info(`  Content: ${contentDir}`);
         logger.info(`  Output: ${out}`);
         logger.info(`  Mode: ${clean ? 'clean' : 'incremental'}`);
         if (Object.keys(filters).length > 0) {
@@ -329,7 +343,7 @@ async function main(): Promise<void> {
 
         const result = await buildIndex({
           root,
-          content: config.content?.dir || args.content,
+          content: contentDir,
           out,
           clean,
           includeDrafts: args['include-drafts'],
