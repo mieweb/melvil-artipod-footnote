@@ -7,6 +7,21 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 import type { AgentConfig as ConfigAgentConfig } from '../config/schema.js';
+import { OLLAMA_EMBEDDING_MODELS } from '../embedder/embedder.js';
+
+/**
+ * Derive the embedding provider name from a model identifier.
+ * Mirrors the dispatch logic in createEmbedder().
+ */
+function resolveEmbeddingProvider(model: string): string {
+  if (model === 'mock') return 'mock';
+  if (model.startsWith('ollama:')) return 'ollama';
+  const lower = model.toLowerCase();
+  if (Object.keys(OLLAMA_EMBEDDING_MODELS).some(m => lower.includes(m.toLowerCase()))) {
+    return 'ollama';
+  }
+  return 'openai';
+}
 
 export interface AgentConfig {
   system_prompt: string;
@@ -114,7 +129,7 @@ export function generateManifest(options: {
     embedding: {
       model_id: options.embeddingModel,
       dimension: options.embeddingDim,
-      provider: options.embeddingModel === 'mock' ? 'mock' : 'openai'
+      provider: resolveEmbeddingProvider(options.embeddingModel)
     },
     fts_fields: ['title', 'content'],
     doc_count: options.docCount,
