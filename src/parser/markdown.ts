@@ -269,6 +269,20 @@ export function parseMarkdown(content: string): { headings: HeadingInfo[]; secti
 }
 
 /**
+ * Parse plain text (no front matter, no headings) as a single section.
+ * Used for .txt files.
+ */
+export function parseAsPlainText(content: string): { headings: HeadingInfo[]; sections: Section[] } {
+  const trimmed = content.trim();
+  if (!trimmed) return { headings: [], sections: [] };
+  const lineCount = trimmed.split('\n').length;
+  return {
+    headings: [],
+    sections: [{ headingPath: [], content: trimmed, startLine: 1, endLine: lineCount }]
+  };
+}
+
+/**
  * Parse a complete markdown document
  */
 export function parseDocument(rawContent: string, brand: 'eh' | 'wc' | 'both'): ParsedDocument {

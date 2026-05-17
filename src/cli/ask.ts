@@ -2001,7 +2001,9 @@ async function startServer(app: AppContext, port: number): Promise<void> {
 
     // Document viewer: try to resolve any other GET path as a document URL
     if (req.method === 'GET') {
-      const docPath = url.pathname;
+      // Normalize: decode URI encoding, strip known extensions (with optional trailing slash), ensure trailing slash
+      let docPath = decodeURIComponent(url.pathname).replace(/\.(md|txt|pdf|docx)\/?$/i, '/');
+      if (!docPath.endsWith('/')) docPath += '/';
       const chunks = app.store.getDocumentChunks(docPath);
       if (chunks.length > 0) {
         const doc = chunks[0];

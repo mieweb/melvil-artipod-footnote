@@ -4,10 +4,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+const INDEXABLE_EXTENSIONS = new Set(['.md', '.txt', '.pdf', '.docx']);
+
 /**
- * Recursively find all markdown files in a directory
+ * Recursively find all indexable files (.md, .txt, .pdf) in a directory
  */
-export function findMarkdownFiles(dir: string, baseDir?: string): string[] {
+export function findIndexableFiles(dir: string, baseDir?: string): string[] {
   const base = baseDir || dir;
   const files: string[] = [];
   
@@ -21,12 +23,13 @@ export function findMarkdownFiles(dir: string, baseDir?: string): string[] {
     const fullPath = path.join(dir, entry.name);
     
     if (entry.isDirectory()) {
-      // Skip hidden directories and asset folders
-      if (entry.name.startsWith('.') || entry.name.endsWith('.assets')) {
+      // Skip hidden directories, asset folders, and dependency/build dirs
+      if (entry.name.startsWith('.') || entry.name.endsWith('.assets') ||
+          entry.name === 'node_modules' || entry.name === 'dist') {
         continue;
       }
-      files.push(...findMarkdownFiles(fullPath, base));
-    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      files.push(...findIndexableFiles(fullPath, base));
+    } else if (entry.isFile() && INDEXABLE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
       // Return path relative to base directory
       files.push(path.relative(base, fullPath));
     }
@@ -34,6 +37,9 @@ export function findMarkdownFiles(dir: string, baseDir?: string): string[] {
   
   return files.sort();
 }
+
+/** @deprecated Use findIndexableFiles */
+export const findMarkdownFiles = findIndexableFiles;
 
 /**
  * Get file modification time

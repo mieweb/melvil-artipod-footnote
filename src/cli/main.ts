@@ -59,6 +59,7 @@ USAGE:
 
 COMMANDS:
   build     Build or update the SQLite hybrid index from markdown content
+  ask       Ask Melvil a question (agentic RAG assistant with citations)
   query     Run a test query against an existing index
   mcp       Start an MCP (Model Context Protocol) server for AI assistants
 
@@ -90,6 +91,13 @@ QUERY OPTIONS:
   --hybrid <query>      Query string for hybrid search
   --k <n>               Number of results to return (default: 10)
 
+ASK OPTIONS:
+  --db <path>           Path to index directory (default: ./.footnote)
+  --serve               Start HTTP web UI instead of single-question mode
+  --port <n>            Port for web server (default: 3000)
+  -v, --verbose         Show tool calls and reasoning steps
+  -c, --content         Show full chunk content in answers
+
 ENVIRONMENT:
   OPENAI_API_KEY        Required if using OpenAI embeddings (not needed for Ollama)
   LOG_LEVEL             Logging verbosity (debug, info, warn, error)
@@ -112,6 +120,12 @@ EXAMPLES:
 
   # Start MCP server for AI assistants
   docidx mcp --db ./.footnote
+
+  # Ask Melvil a question (CLI)
+  docidx ask "How do I schedule an appointment?"
+
+  # Start Melvil web UI
+  docidx ask --serve --port 3000
 `);
 }
 
@@ -361,6 +375,15 @@ async function main(): Promise<void> {
           console.log(`   Chunk: ${result.chunk_id}`);
           console.log('');
         }
+        break;
+      }
+
+      case 'ask': {
+        // ask.ts parses process.argv directly — remove the 'ask' subcommand token
+        // so it sees the same argv as if invoked standalone.
+        const askIdx = process.argv.indexOf('ask');
+        if (askIdx !== -1) process.argv.splice(askIdx, 1);
+        await import('./ask.js');
         break;
       }
 

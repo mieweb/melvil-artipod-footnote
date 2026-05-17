@@ -57,8 +57,8 @@ export function generateUrl(relativePath: string, contentRoot: string = 'content
     url = url.slice(contentRoot.length + 1);
   }
   
-  // Remove .md extension
-  url = url.replace(/\.md$/, '');
+  // Remove known document extensions
+  url = url.replace(/\.(md|txt|pdf|docx)$/i, '');
   
   // Handle _index files
   url = url.replace(/\/_index$/, '');

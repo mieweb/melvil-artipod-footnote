@@ -9,7 +9,9 @@ import * as fs from 'fs';
 import { createLogger, format, transports } from 'winston';
 import { createHash } from 'crypto';
 
-import { parseFrontMatter, parseMarkdown } from '../parser/markdown.js';
+import { parseFrontMatter, parseMarkdown, parseAsPlainText } from '../parser/markdown.js';
+import { parsePdf } from '../parser/pdf.js';
+import { parseDocx } from '../parser/docx.js';
 import { processShortcodes, shouldIncludeDocument } from '../parser/transform.js';
 import { chunkDocument, hashContent, type Chunk } from '../chunker/chunker.js';
 import { createEmbedder, type Embedder } from '../embedder/embedder.js';
@@ -17,7 +19,7 @@ import { createEmbeddingCache, type EmbeddingCache } from '../embedder/cache.js'
 import { SqliteStore, type ChunkRecord } from '../storage/sqlite.js';
 import { generateManifest, writeManifest } from '../storage/manifest.js';
 import { generateDocId, generateChunkId, generateUrl, extractSection } from '../utils/ids.js';
-import { findMarkdownFiles, getFileMtime, readFile, ensureDir } from '../utils/files.js';
+import { findIndexableFiles, getFileMtime, readFile, ensureDir } from '../utils/files.js';
 import type { DocidxConfig, TransformContext } from '../config/schema.js';
 
 const logger = createLogger({
@@ -81,7 +83,7 @@ function copyContentDir(src: string, dest: string): void {
         }
         fs.mkdirSync(destPath, { recursive: true });
         copyRecursive(srcPath, destPath);
-      } else if (entry.name.endsWith('.md')) {
+      } else if (['.md', '.txt', '.pdf', '.docx'].includes(path.extname(entry.name).toLowerCase())) {
         fs.copyFileSync(srcPath, destPath);
       }
     }
@@ -145,9 +147,9 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
       logger.info('Clean build: removing existing data');
     }
 
-    // Find all markdown files
-    const allFiles = findMarkdownFiles(contentDir);
-    logger.info(`Found ${allFiles.length} markdown files`);
+    // Find all indexable files (.md, .txt, .pdf)
+    const allFiles = findIndexableFiles(contentDir);
+    logger.info(`Found ${allFiles.length} files to index`);
 
     // Determine which files need processing
     const trackedPaths = new Set(store.getAllTrackedPaths());
@@ -197,30 +199,48 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
       const rawContent = readFile(fullPath);
       const contentHash = computeFileHash(rawContent);
       
-      // Parse front matter first
-      const { data: frontMatter, body } = parseFrontMatter(rawContent);
-      
-      // Check if document should be included based on filters
-      if (!shouldIncludeDocument(frontMatter, options.config, options.filters)) {
-        continue;
+      const ext = path.extname(relativePath).toLowerCase();
+      let frontMatter: import('../parser/markdown.js').FrontMatter = {};
+      let headings: import('../parser/markdown.js').HeadingInfo[];
+      let sections: import('../parser/markdown.js').Section[];
+
+      if (ext === '.pdf') {
+        // PDF: async text extraction, no front matter or shortcodes
+        const pdfBuffer = fs.readFileSync(path.join(contentDir, relativePath));
+        ({ headings, sections } = await parsePdf(pdfBuffer));      } else if (ext === '.docx') {
+        // DOCX: extract plain text, no front matter or shortcodes
+        const docxBuffer = fs.readFileSync(path.join(contentDir, relativePath));
+        ({ headings, sections } = await parseDocx(docxBuffer));      } else if (ext === '.docx') {
+        // DOCX: extract plain text, no front matter or shortcodes
+        const docxBuffer = fs.readFileSync(path.join(contentDir, relativePath));
+        ({ headings, sections } = await parseDocx(docxBuffer));
+      } else if (ext === '.txt') {
+        // Plain text: no front matter or shortcodes
+        ({ headings, sections } = parseAsPlainText(rawContent));
+      } else {
+        // Markdown: parse front matter, apply shortcodes
+        const { data: fm, body } = parseFrontMatter(rawContent);
+        frontMatter = fm;
+
+        // Check if document should be included based on filters
+        if (!shouldIncludeDocument(frontMatter, options.config, options.filters)) {
+          continue;
+        }
+
+        // Skip drafts unless included
+        if (frontMatter.draft && !options.includeDrafts) {
+          skippedDrafts++;
+          continue;
+        }
+
+        const transformContext: TransformContext = {
+          frontMatter,
+          filePath: relativePath,
+          filters: options.filters
+        };
+        const processedContent = processShortcodes(body, options.config, transformContext);
+        ({ headings, sections } = parseMarkdown(processedContent));
       }
-      
-      // Skip drafts unless included
-      if (frontMatter.draft && !options.includeDrafts) {
-        skippedDrafts++;
-        continue;
-      }
-      
-      // Create transform context
-      const transformContext: TransformContext = {
-        frontMatter,
-        filePath: relativePath,
-        filters: options.filters
-      };
-      
-      // Process shortcodes using config-based transforms
-      const processedContent = processShortcodes(body, options.config, transformContext);
-      const { headings, sections } = parseMarkdown(processedContent);
 
       // Generate document ID
       const docId = generateDocId(relativePath, contentHash);
@@ -242,7 +262,7 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
       // Create chunk records
       const url = generateUrl(relativePath, options.content);
       const section = extractSection(relativePath, options.content);
-      const title = frontMatter.title as string || path.basename(relativePath, '.md');
+      const title = frontMatter.title as string || path.basename(relativePath, path.extname(relativePath));
       const tags = (frontMatter.tags as string[]) || [];
       const date = (frontMatter.date as string) || '';
 
