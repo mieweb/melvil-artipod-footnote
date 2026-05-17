@@ -1,8 +1,8 @@
 /**
  * docidx - Markdown Content Index Compiler
  * 
- * Produces portable SQLite hybrid index artipods (sqlite-vec + FTS5)
- * from Hugo/markdown content for server-side RAG consumption.
+ * Produces portable SQLite hybrid footnote indexes (sqlite-vec + FTS5)
+ * from markdown content for server-side RAG consumption.
  */
 import minimist from 'minimist';
 import * as fs from 'fs';
@@ -33,39 +33,20 @@ const logger = createLogger({
 });
 
 /**
- * Auto-detect project root by looking for the configured content directory
+ * Check if a footnote index directory has a complete index (with manifest)
  */
-function findProjectRootByContentDir(startDir: string, contentDir: string): string | null {
-  let dir = path.resolve(startDir);
-  
-  // Walk up looking for a directory with the requested content dir
-  for (let i = 0; i < 10; i++) {
-    if (fs.existsSync(path.join(dir, contentDir))) {
-      return dir;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  
-  return null;
-}
-
-/**
- * Check if an artipod directory has a complete index (with manifest)
- */
-function artipodComplete(artipodDir: string): boolean {
-  const manifestPath = path.join(artipodDir, 'manifest.json');
-  const indexPath = path.join(artipodDir, 'index.sqlite');
+function indexComplete(footnoteDir: string): boolean {
+  const manifestPath = path.join(footnoteDir, 'manifest.json');
+  const indexPath = path.join(footnoteDir, 'index.sqlite');
   
   return fs.existsSync(manifestPath) && fs.existsSync(indexPath);
 }
 
 /**
- * Check if an artipod directory has a partial index (resumable)
+ * Check if a footnote index directory has a partial index (resumable)
  */
-function artipodResumable(artipodDir: string): boolean {
-  const indexPath = path.join(artipodDir, 'index.sqlite');
+function indexResumable(footnoteDir: string): boolean {
+  const indexPath = path.join(footnoteDir, 'index.sqlite');
   return fs.existsSync(indexPath);
 }
 
@@ -86,9 +67,9 @@ CONFIGURATION:
   This file defines shortcodes, filters, agent prompts, and other settings.
 
 BUILD OPTIONS:
-  --root <path>         Project root (auto-detected if not specified)
+  --root <path>         Project root (default: current directory)
   --content <path>      Content directory relative to root (default: content)
-  --out <path>          Output artipod directory (default: ./artipod)
+  --out <path>          Output directory (default: ./.footnote)
   --clean               Remove existing index and rebuild from scratch
   --incremental         Only process changed files (auto: incremental if exists, clean if not)
   --include-drafts      Include draft documents (draft: true in front matter)
@@ -101,11 +82,11 @@ BUILD OPTIONS:
   --pull                Automatically pull Ollama model if not installed
   --max-tokens <n>      Max tokens per chunk (default: 500)
   --overlap <n>         Token overlap between chunks (default: 80)
-  --compress            Generate artipod.tar.zst after build
-  --copy-content        Copy markdown files to artipod for grep-based search
+  --compress            Generate .footnote.tar.zst after build
+  --copy-content        Copy markdown files to footnote index for grep-based search
 
 QUERY OPTIONS:
-  --db <path>           Path to artipod directory (default: ./artipod)
+  --db <path>           Path to index directory (default: ./.footnote)
   --hybrid <query>      Query string for hybrid search
   --k <n>               Number of results to return (default: 10)
 
@@ -130,7 +111,7 @@ EXAMPLES:
   docidx query --hybrid "patient registration" --k 5
 
   # Start MCP server for AI assistants
-  docidx mcp --db ./artipod
+  docidx mcp --db ./.footnote
 `);
 }
 
@@ -186,19 +167,8 @@ async function main(): Promise<void> {
           ? args.content
           : (config.content?.dir || DEFAULT_CONFIG.content?.dir || args.content);
 
-        // Auto-detect project root if not specified.
-        let root = args.root;
-        if (!cliProvidedRoot) {
-          if (cliProvidedContent) {
-            root = findProjectRootByContentDir(process.cwd(), contentDir) || process.cwd();
-          } else {
-            root = resolveContentRoot(config, process.cwd());
-          }
-
-          if (root !== process.cwd()) {
-            logger.info(`Auto-detected project root: ${root}`);
-          }
-        }
+        // Use configured root, or default to CWD.
+        let root = args.root || resolveContentRoot(config, process.cwd());
 
         // Parse filters from CLI (--filter brand=eh --filter foo=bar)
         const filters: Record<string, string> = {};
@@ -214,19 +184,19 @@ async function main(): Promise<void> {
         }
 
         // Default output directory
-        const out = args.out || path.join(root, 'artipod');
+        const out = args.out || path.join(root, '.footnote');
 
-        // Auto-detect clean vs incremental based on artipod existence
+        // Auto-detect clean vs incremental based on index existence
         let clean = args.clean;
-        const hasCompleteArtipod = artipodComplete(out);
-        const hasResumableArtipod = artipodResumable(out);
+        const hasCompleteIndex = indexComplete(out);
+        const hasResumableIndex = indexResumable(out);
         
         if (!args.clean && !args.incremental) {
           // Neither explicitly set - auto-detect
-          if (hasCompleteArtipod) {
+          if (hasCompleteIndex) {
             clean = false;
             logger.info(`Existing index found, using incremental mode`);
-          } else if (hasResumableArtipod) {
+          } else if (hasResumableIndex) {
             clean = false;
             logger.info(`Partial index found, resuming build`);
           } else {
@@ -240,7 +210,7 @@ async function main(): Promise<void> {
         let embeddingDim = args['embedding-dim'];
         let existingManifest: ReturnType<typeof readManifest> = null;
         
-        if (!clean && hasCompleteArtipod) {
+        if (!clean && hasCompleteIndex) {
           const manifestPath = path.join(out, 'manifest.json');
           existingManifest = readManifest(manifestPath);
           
@@ -366,8 +336,8 @@ async function main(): Promise<void> {
 
       case 'query': {
         // Default db path
-        const dbPath = args.db || './artipod';
-        if (!artipodComplete(dbPath)) {
+        const dbPath = args.db || './.footnote';
+        if (!indexComplete(dbPath)) {
           logger.error(`No complete index found at ${dbPath}. Run 'docidx build' first.`);
           process.exit(1);
         }
@@ -398,7 +368,7 @@ async function main(): Promise<void> {
       case 'mcp': {
         // MCP server is a separate entry point — import and run it
         const { startMcpServer } = await import('./mcp.js');
-        await startMcpServer(args.db || './artipod');
+        await startMcpServer(args.db || './.footnote');
         break;
       }
 

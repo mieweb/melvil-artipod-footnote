@@ -340,7 +340,7 @@ interface AgentContext {
   searchResults: Map<string, SearchResult>;  // Deduplicated results by chunk_id
   resultOrder: string[];  // Order of first appearance
   showChunks: boolean;  // Whether to display full chunk content
-  artipodDir: string;  // Path to artipod directory (for grep search)
+  footnoteDir: string;  // Path to footnote index directory (for grep search)
   debugDir: string;  // Path to debug folder for conversation logs
 }
 
@@ -557,7 +557,7 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
         return errorResult('Error: search_grep is not available. Rebuild with --copy-content to enable.');
       }
       
-      const contentDir = path.join(ctx.artipodDir, 'content');
+      const contentDir = path.join(ctx.footnoteDir, 'content');
       if (!fs.existsSync(contentDir)) {
         return errorResult(`Error: Content directory not found at ${contentDir}. Index may need rebuilding.`);
       }
@@ -922,7 +922,7 @@ function saveDebugConversation(
         timestamp: new Date().toISOString(),
         model: ctx.model,
         documentsConsulted: ctx.searchResults.size,
-        artipodDir: ctx.artipodDir,
+        footnoteDir: ctx.footnoteDir,
         debugFile,
         reportToken  // Secret token for validating report requests
       },
@@ -1477,35 +1477,39 @@ interface AppContext {
   manifest: ManifestData;
   agentModel: string;
   maxIterations: number;
-  artipodDir: string;
+  footnoteDir: string;
   verbose: boolean;
 }
 
 async function initializeApp(): Promise<AppContext> {
   const verbose = args.verbose;
   
-  // Auto-detect artipod directory from project config if not specified
-  let artipodDir = args.db;
-  if (!artipodDir) {
-    // Try to find artipod in project root
+  // Auto-detect footnote index directory from project config if not specified
+  let footnoteDir = args.db;
+  if (!footnoteDir) {
     const { config } = await loadProjectConfig(process.cwd());
     const projectRoot = resolveContentRoot(config, process.cwd());
-    artipodDir = path.join(projectRoot, 'artipod');
-    
-    // Fallback to current directory
-    if (!fs.existsSync(artipodDir)) {
-      artipodDir = './artipod';
-    }
+
+    // Check candidate directories in priority order
+    const candidates = [
+      path.join(projectRoot, 'artipod'),   // default build output
+      path.join(projectRoot, '.footnote'),  // alternate name
+      path.join(process.cwd(), 'artipod'),
+      path.join(process.cwd(), '.footnote'),
+    ];
+
+    const found = candidates.find(d => fs.existsSync(path.join(d, 'index.sqlite')));
+    footnoteDir = found || candidates[0]; // use first candidate as default even if missing
   }
   
-  artipodDir = path.resolve(artipodDir);
-  const indexPath = path.join(artipodDir, 'index.sqlite');
-  const manifestPath = path.join(artipodDir, 'manifest.json');
+  footnoteDir = path.resolve(footnoteDir);
+  const indexPath = path.join(footnoteDir, 'index.sqlite');
+  const manifestPath = path.join(footnoteDir, 'manifest.json');
 
   if (verbose) {
     console.log(`\n📂 Configuration:`);
-    console.log(`   Artipod:   ${artipodDir}`);
-    console.log(`   Index:     ${indexPath}`);
+    console.log(`   Index:     ${footnoteDir}`);
+    console.log(`   DB:        ${indexPath}`);
     console.log(`   Manifest:  ${manifestPath}`);
   }
 
@@ -1556,7 +1560,7 @@ async function initializeApp(): Promise<AppContext> {
 
   store.init(false);
 
-  return { embedder, store, manifest, agentModel, maxIterations, artipodDir, verbose: args.verbose };
+  return { embedder, store, manifest, agentModel, maxIterations, footnoteDir, verbose: args.verbose };
 }
 
 /**
@@ -1576,8 +1580,8 @@ async function askQuestion(
     searchResults: new Map(),
     resultOrder: [],
     showChunks: options.showChunks || false,
-    artipodDir: app.artipodDir,
-    debugDir: path.join(app.artipodDir, 'debug')
+    footnoteDir: app.footnoteDir,
+    debugDir: path.join(app.footnoteDir, 'debug')
   };
 
   const answer = await runAgent(question, ctx, app.maxIterations);
@@ -1591,7 +1595,7 @@ function escapeHtmlServer(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-/** Hugo-compatible anchor slug (mirrors client-side slugify) */
+/** Anchor slug (mirrors client-side slugify) */
 function slugifyServer(heading: string): string {
   return heading.toLowerCase().trim()
     .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
@@ -1789,8 +1793,8 @@ async function startServer(app: AppContext, port: number): Promise<void> {
           searchResults: new Map(),
           resultOrder: [],
           showChunks: false,  // Don't dump full chunks - too noisy
-          artipodDir: app.artipodDir,
-          debugDir: path.join(app.artipodDir, 'debug')
+          footnoteDir: app.footnoteDir,
+          debugDir: path.join(app.footnoteDir, 'debug')
         };
 
         // Stream events with verbose logging
@@ -1935,7 +1939,7 @@ async function startServer(app: AppContext, port: number): Promise<void> {
           return;
         }
 
-        const debugDir = path.join(app.artipodDir, 'debug');
+        const debugDir = path.join(app.footnoteDir, 'debug');
         const originalPath = path.join(debugDir, debugFile);
 
         // Check if file exists
@@ -2071,7 +2075,7 @@ async function startServer(app: AppContext, port: number): Promise<void> {
   });
 
   // Start debug file cleanup timer
-  const debugDir = path.join(app.artipodDir, 'debug');
+  const debugDir = path.join(app.footnoteDir, 'debug');
   const cleanupTimer = startDebugCleanupTimer(debugDir, app.verbose);
 
   server.listen(port, () => {
@@ -2117,8 +2121,8 @@ async function main(): Promise<void> {
         searchResults: new Map(),
         resultOrder: [],
         showChunks: args.chunks,
-        artipodDir: app.artipodDir,
-        debugDir: path.join(app.artipodDir, 'debug')
+        footnoteDir: app.footnoteDir,
+        debugDir: path.join(app.footnoteDir, 'debug')
       };
 
       console.log('\n' + '─'.repeat(60));
