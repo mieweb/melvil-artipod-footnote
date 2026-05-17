@@ -17,7 +17,10 @@ case "$1" in
       PREV_ARG="$arg"
     done
     # Use compiled dist/ if available (lighter than tsx); fall back to tsx for dev
-    # Auto-restart on SIGKILL (137) so macOS memory pressure doesn't kill the server permanently
+    # Auto-restart on SIGKILL (137) up to 5 times with exponential backoff
+    RESTART_COUNT=0
+    MAX_RESTARTS=5
+    BACKOFF=3
     while true; do
       if [ -f "$SCRIPT_DIR/dist/cli/ask.js" ]; then
         node "$SCRIPT_DIR/dist/cli/ask.js" "$@"
@@ -27,8 +30,14 @@ case "$1" in
       EXIT_CODE=$?
       # Only restart on SIGKILL (137); exit normally for Ctrl-C (130) or clean exit (0)
       if [ $EXIT_CODE -eq 137 ]; then
-        echo "⚠️  Server killed by OS (memory pressure), restarting in 3s..."
-        sleep 3
+        RESTART_COUNT=$((RESTART_COUNT + 1))
+        if [ $RESTART_COUNT -gt $MAX_RESTARTS ]; then
+          echo "❌ Server killed $MAX_RESTARTS times in a row — stopping. Free up memory and try again."
+          break
+        fi
+        echo "⚠️  Server killed by OS (memory pressure), restart $RESTART_COUNT/$MAX_RESTARTS in ${BACKOFF}s..."
+        sleep $BACKOFF
+        BACKOFF=$((BACKOFF * 2))
         lsof -ti :"$SERVE_PORT" | xargs kill -9 2>/dev/null
         sleep 1
       else
