@@ -136,20 +136,76 @@ function linesToMarkdown(lines: PdfLine[]): string {
   const out: string[] = [];
   let pendingHeading = '';
   let pendingDepth = 0;
-  let bodyBuffer: string[] = [];
+  type BodyPart = { bullet: boolean; text: string };
+  let bodyBuffer: BodyPart[] = [];
+  let nextIsBullet = false; // set when a standalone bullet char is its own PdfLine
   let prevPageY = lines[0].pageY;
+
+  /** Split a body line on bullet characters and push typed parts. */
+  const pushBody = (text: string) => {
+    const trimmed = text.trim();
+    // Standalone bullet char (separate pdfjs item before the actual text)
+    if (/^[•·▪▸○◦▷»]+$/.test(trimmed)) {
+      nextIsBullet = true;
+      return;
+    }
+    if (nextIsBullet) {
+      nextIsBullet = false;
+      bodyBuffer.push({ bullet: true, text: trimmed });
+      return;
+    }
+    // A line may start with a bullet, contain inline bullets, or be pure prose.
+    const parts = trimmed.split(/\s*[•·▪▸○◦▷»]\s*/);
+    if (parts.length > 1) {
+      // First part is intro prose (empty if line starts with bullet — skip it)
+      if (parts[0].trim()) bodyBuffer.push({ bullet: false, text: parts[0].trim() });
+      for (const p of parts.slice(1)) {
+        if (p.trim()) bodyBuffer.push({ bullet: true, text: p.trim() });
+      }
+    } else {
+      // Continuation of a previous bullet: starts with lowercase or '(' and the
+      // last item in the buffer is a bullet (PDF word-wrap across physical lines)
+      const last = bodyBuffer.at(-1);
+      if (last?.bullet && /^[a-z(]/.test(trimmed)) {
+        last.text += ' ' + trimmed;
+      } else {
+        bodyBuffer.push({ bullet: false, text: trimmed });
+      }
+    }
+  };
+
+  const flushBody = () => {
+    nextIsBullet = false;
+    if (!bodyBuffer.length) return;
+    let i = 0;
+    while (i < bodyBuffer.length) {
+      if (bodyBuffer[i].bullet) {
+        const items: string[] = [];
+        while (i < bodyBuffer.length && bodyBuffer[i].bullet) {
+          items.push(`- ${bodyBuffer[i].text}`);
+          i++;
+        }
+        out.push(items.join('\n'));
+        out.push('');
+      } else {
+        const prose: string[] = [];
+        while (i < bodyBuffer.length && !bodyBuffer[i].bullet) {
+          prose.push(bodyBuffer[i].text);
+          i++;
+        }
+        out.push(prose.join(' '));
+      }
+    }
+    bodyBuffer = [];
+  };
 
   const flushHeading = () => {
     if (!pendingHeading) return;
-    if (bodyBuffer.length) { out.push(bodyBuffer.join(' ')); bodyBuffer = []; out.push(''); }
+    if (bodyBuffer.length) { flushBody(); out.push(''); }
     out.push(`${'#'.repeat(pendingDepth)} ${pendingHeading.trim()}`);
     out.push('');
     pendingHeading = '';
     pendingDepth = 0;
-  };
-
-  const flushBody = () => {
-    if (bodyBuffer.length) { out.push(bodyBuffer.join(' ')); bodyBuffer = []; }
   };
 
   for (const line of lines) {
@@ -173,7 +229,7 @@ function linesToMarkdown(lines: PdfLine[]): string {
     } else {
       flushHeading();
       if (isParagraphBreak && bodyBuffer.length > 0) { flushBody(); out.push(''); }
-      bodyBuffer.push(line.text);
+      pushBody(line.text);
     }
     prevPageY = line.pageY;
   }
