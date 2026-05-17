@@ -68,7 +68,7 @@ CONFIGURATION:
 
 BUILD OPTIONS:
   --root <path>         Project root (default: current directory)
-  --content <path>      Content directory relative to root (default: content)
+  --content <path>      Content directory relative to root (default: . i.e. root itself)
   --out <path>          Output directory (default: ./.footnote)
   --clean               Remove existing index and rebuild from scratch
   --incremental         Only process changed files (auto: incremental if exists, clean if not)
@@ -117,14 +117,13 @@ EXAMPLES:
 
 async function main(): Promise<void> {
   const rawArgv = process.argv.slice(2);
-  const cliProvidedRoot = rawArgv.includes('--root') || rawArgv.includes('-r');
   const cliProvidedContent = rawArgv.includes('--content') || rawArgv.includes('-c');
 
   const args = minimist(rawArgv, {
     string: ['root', 'content', 'out', 'filter', 'embedding-model', 'db', 'hybrid'],
     boolean: ['clean', 'incremental', 'include-drafts', 'compress', 'help', 'version', 'pull', 'copy-content'],
     default: {
-      content: 'content',
+      content: '.',
       // embedding-model and embedding-dim intentionally omitted for auto-detection
       'max-tokens': 500,
       overlap: 80,

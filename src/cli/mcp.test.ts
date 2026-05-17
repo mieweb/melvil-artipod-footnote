@@ -20,7 +20,7 @@ import { SqliteStore } from '../storage/sqlite.js';
 import { writeManifest, generateManifest } from '../storage/manifest.js';
 import { createEmbedder } from '../embedder/embedder.js';
 
-// ── Fixture: tiny artipod with 2 docs, mock embeddings ──
+// ── Fixture: tiny footnote index with 2 docs, mock embeddings ──
 
 let tmpDir: string;
 let client: Client;
@@ -74,7 +74,6 @@ async function buildFixture(): Promise<string> {
   const manifestPath = path.join(tmpDir, 'manifest.json');
   const manifest = generateManifest({
     projectName: 'Test Docs',
-    contentRoot: '/fake/content',
     baseUrl: 'https://docs.example.com/',
     maxTokens: 500,
     overlap: 80,
@@ -90,12 +89,12 @@ async function buildFixture(): Promise<string> {
 
 describe('MCP Server', async () => {
   before(async () => {
-    const artipodDir = await buildFixture();
+    const footnoteDir = await buildFixture();
 
     // Wire server ↔ client via in-memory transport
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
-    const server = await createMcpServer(artipodDir);
+    const server = await createMcpServer(footnoteDir);
     await server.connect(serverTransport);
 
     client = new Client({ name: 'test-client', version: '1.0.0' });
@@ -168,9 +167,9 @@ describe('MCP Server', async () => {
 
   it('exposes manifest resource', async () => {
     const { resources } = await client.listResources();
-    assert.ok(resources.some(r => r.uri === 'artipod://manifest'), 'Should have manifest resource');
+    assert.ok(resources.some(r => r.uri === 'footnote://manifest'), 'Should have manifest resource');
 
-    const { contents } = await client.readResource({ uri: 'artipod://manifest' });
+    const { contents } = await client.readResource({ uri: 'footnote://manifest' });
     const manifest = JSON.parse((contents[0] as { text: string }).text);
     assert.equal(manifest.project_name, 'Test Docs');
     assert.equal(manifest.doc_count, 2);
@@ -183,17 +182,17 @@ describe('MCP Server', async () => {
 
 describe('MCP Server (stdio)', async () => {
   let stdioClient: Client;
-  let artipodDir: string;
+  let footnoteDir: string;
 
   before(async () => {
-    // Reuse buildFixture to create a temp artipod
-    artipodDir = await buildFixture();
+    // Reuse buildFixture to create a temp footnote index
+    footnoteDir = await buildFixture();
 
     const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
 
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: ['--import', 'tsx', path.resolve('src/cli/mcp.ts'), '--db', artipodDir],
+      args: ['--import', 'tsx', path.resolve('src/cli/mcp.ts'), '--db', footnoteDir],
       stderr: 'pipe'
     });
 
@@ -203,7 +202,7 @@ describe('MCP Server (stdio)', async () => {
 
   after(async () => {
     await stdioClient.close();
-    if (artipodDir) fs.rmSync(artipodDir, { recursive: true, force: true });
+    if (footnoteDir) fs.rmSync(footnoteDir, { recursive: true, force: true });
   });
 
   it('lists tools over stdio', async () => {
@@ -223,7 +222,7 @@ describe('MCP Server (stdio)', async () => {
   });
 
   it('reads manifest resource over stdio', async () => {
-    const { contents } = await stdioClient.readResource({ uri: 'artipod://manifest' });
+    const { contents } = await stdioClient.readResource({ uri: 'footnote://manifest' });
     const manifest = JSON.parse((contents[0] as { text: string }).text);
 
     assert.equal(manifest.project_name, 'Test Docs');

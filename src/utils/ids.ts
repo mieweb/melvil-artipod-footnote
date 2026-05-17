@@ -45,7 +45,7 @@ export function generateChunkId(
 }
 
 /**
- * Generate URL from relative path (Hugo permalink-style)
+ * Generate URL from relative path (permalink-style)
  * 
  * Converts: content/functions/e-chart/overview.md
  * To:       /functions/e-chart/overview/

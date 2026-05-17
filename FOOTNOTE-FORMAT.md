@@ -1,11 +1,11 @@
-# Artipod Specification
+# FOOTNOTE Format Specification
 
-An **artipod** is a portable, self-contained documentation index artifact. It packages a SQLite hybrid search database (sqlite-vec + FTS5) with metadata for server-side or browser-based RAG consumption.
+A **footnote index** is a portable, self-contained documentation index artifact. It packages a SQLite hybrid search database (sqlite-vec + FTS5) with metadata for server-side or browser-based RAG consumption.
 
 ## Directory Structure
 
 ```
-artipod/
+.footnote/
 ├── index.sqlite       # SQLite database with vectors + FTS
 ├── manifest.json      # Build metadata and configuration
 └── content/           # (optional) Raw markdown files for grep search
@@ -17,7 +17,7 @@ artipod/
 
 ## manifest.json
 
-The manifest describes the artipod contents, build configuration, and agent settings.
+The manifest describes the footnote index contents, build configuration, and agent settings.
 
 ### Schema
 
@@ -27,7 +27,6 @@ The manifest describes the artipod contents, build configuration, and agent sett
   "project_name": "docs",
   "build_time_utc": "2026-01-31T17:30:43.123Z",
   "source_git_commit": "abc123def456...",
-  "content_root": "content",
   "chunking": {
     "max_tokens": 500,
     "overlap": 80,
@@ -60,11 +59,10 @@ The manifest describes the artipod contents, build configuration, and agent sett
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `schema_version` | string | ✓ | Artipod schema version (currently `"1.0"`) |
+| `schema_version` | string | ✓ | Footnote format schema version (currently `"1.0"`) |
 | `project_name` | string | | Human-readable project name |
 | `build_time_utc` | string | ✓ | ISO 8601 timestamp of build |
 | `source_git_commit` | string | | Git commit hash at build time (null if not in repo) |
-| `content_root` | string | ✓ | Source content directory relative to project root |
 | `chunking` | object | ✓ | Chunking configuration |
 | `chunking.max_tokens` | number | ✓ | Maximum tokens per chunk |
 | `chunking.overlap` | number | ✓ | Token overlap between consecutive chunks |
@@ -79,7 +77,7 @@ The manifest describes the artipod contents, build configuration, and agent sett
 | `filters` | object | | Content filters applied during build |
 | `content_copy` | object | | Content file copy configuration |
 | `content_copy.enabled` | boolean | | Whether raw files were copied |
-| `content_copy.path` | string | | Relative path within artipod |
+| `content_copy.path` | string | | Relative path within index directory |
 | `agent` | object | | Agent configuration |
 | `agent.model` | string | | LLM model for agent queries |
 | `agent.max_iterations` | number | | Maximum tool call iterations |
@@ -258,7 +256,7 @@ Optional directory containing raw markdown files, copied from the source content
 
 - **Grep search**: Enables Unix grep-based search as an alternative to SQLite
 - **Source reference**: Provides access to original markdown for debugging
-- **Portability**: Makes the artipod fully self-contained
+- **Portability**: Makes the footnote index fully self-contained
 
 ### Structure
 
@@ -299,13 +297,13 @@ Enable only when grep search is needed for comparison or fallback.
 
 ### Compatibility
 
-- **Forward compatible**: Newer readers should handle older artipods
+- **Forward compatible**: Newer readers should handle older footnote indexes
 - **Backward compatible**: New optional fields don't break older readers
 - **Breaking changes**: Increment major version (e.g., `2.0`)
 
 ## Usage
 
-### Building an Artipod
+### Building a Footnote Index
 
 ```bash
 # Basic build
@@ -318,18 +316,18 @@ Enable only when grep search is needed for comparison or fallback.
 ./docidx.sh build --filter brand=eh
 ```
 
-### Consuming an Artipod
+### Consuming a Footnote Index
 
 ```typescript
 import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
 
 // Load database
-const db = new Database('artipod/index.sqlite');
+const db = new Database('.footnote/index.sqlite');
 sqliteVec.load(db);
 
 // Read manifest
-const manifest = JSON.parse(fs.readFileSync('artipod/manifest.json', 'utf-8'));
+const manifest = JSON.parse(fs.readFileSync('.footnote/manifest.json', 'utf-8'));
 
 // Vector search (requires embedding the query first)
 const results = db.prepare(`
@@ -353,11 +351,11 @@ const ftsResults = db.prepare(`
 
 ### Browser Usage
 
-See [sqlite-vec WASM documentation](https://alexgarcia.xyz/sqlite-vec/wasm.html) for loading artipods in the browser.
+See [sqlite-vec WASM documentation](https://alexgarcia.xyz/sqlite-vec/wasm.html) for loading footnote indexes in the browser.
 
 ## Design Principles
 
-1. **Self-contained**: All data needed for search is in the artipod
+1. **Self-contained**: All data needed for search is in the footnote index
 2. **Portable**: Standard SQLite format works everywhere
 3. **Efficient**: sqlite-vec and FTS5 provide fast hybrid search
 4. **Incremental**: File tracking enables fast rebuilds

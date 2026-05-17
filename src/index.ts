@@ -1,8 +1,8 @@
 /**
  * docidx - Markdown Content Index Compiler
  * 
- * Produces portable SQLite hybrid index artipods (sqlite-vec + FTS5)
- * from Hugo/markdown content for server-side RAG consumption.
+ * Produces portable SQLite hybrid footnote indexes (sqlite-vec + FTS5)
+ * from markdown content for server-side RAG consumption.
  */
 
 // Configuration
@@ -15,8 +15,8 @@ export { readManifest, writeManifest, generateManifest, DEFAULT_SYSTEM_PROMPT } 
 export type { ManifestData, AgentConfig } from './storage/manifest.js';
 
 // Parser
-export { parseFrontMatter, parseMarkdown } from './parser/hugo.js';
-export type { FrontMatter, ParsedDocument, HeadingInfo, Section } from './parser/hugo.js';
+export { parseFrontMatter, parseMarkdown } from './parser/markdown.js';
+export type { FrontMatter, ParsedDocument, HeadingInfo, Section } from './parser/markdown.js';
 export { processShortcodes, shouldIncludeDocument } from './parser/transform.js';
 
 // Chunker

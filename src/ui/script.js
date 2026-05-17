@@ -22,8 +22,8 @@ async function loadStats() {
 }
 
 /**
- * Convert heading text to Hugo-compatible anchor slug
- * Hugo uses goldmark which lowercases and replaces spaces/special chars with hyphens
+ * Convert heading text to an anchor slug
+ * Lowercases and replaces spaces/special chars with hyphens
  * @param {string} heading - Heading text
  * @returns {string} URL-safe anchor slug
  */

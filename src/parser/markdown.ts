@@ -1,7 +1,7 @@
 /**
- * Hugo Markdown Parser
+ * Markdown Parser
  * 
- * Parses Hugo content files, extracting front matter and processing shortcodes.
+ * Parses markdown content files, extracting front matter and processing shortcodes.
  */
 import yaml from 'js-yaml';
 import { unified } from 'unified';
@@ -124,7 +124,7 @@ const SHORTCODE_RULES: Record<string, ShortcodeRule> = {
 };
 
 /**
- * Process Hugo shortcodes in markdown content
+ * Process shortcodes in markdown content
  */
 export function processShortcodes(content: string, brand: 'eh' | 'wc' | 'both'): string {
   let result = content;
@@ -269,7 +269,7 @@ export function parseMarkdown(content: string): { headings: HeadingInfo[]; secti
 }
 
 /**
- * Parse a complete Hugo markdown document
+ * Parse a complete markdown document
  */
 export function parseDocument(rawContent: string, brand: 'eh' | 'wc' | 'both'): ParsedDocument {
   const { data: frontMatter, body } = parseFrontMatter(rawContent);

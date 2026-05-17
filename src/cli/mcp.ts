@@ -1,13 +1,13 @@
 #!/usr/bin/env npx tsx
 /**
- * MCP Server for Artipod Documentation Search
+ * MCP Server for FOOTNOTE Documentation Search
  *
- * Exposes artipod search capabilities as MCP tools so AI assistants
+ * Exposes footnote index search capabilities as MCP tools so AI assistants
  * (VS Code Copilot, Claude Desktop, etc.) can query documentation indexes.
  *
  * Usage:
- *   npx tsx src/cli/mcp.ts --db ./artipod
- *   docidx mcp --db ./artipod
+ *   npx tsx src/cli/mcp.ts --db ./.footnote
+ *   docidx mcp --db ./.footnote
  */
 import * as path from 'path';
 import * as fs from 'fs';
@@ -25,7 +25,7 @@ import { readManifest, type ManifestData } from '../storage/manifest.js';
 const args = minimist(process.argv.slice(2), {
   string: ['db'],
   default: {
-    db: './artipod'
+    db: './.footnote'
   }
 });
 
@@ -89,12 +89,12 @@ function formatChunkResults(results: ChunkResult[], baseUrl?: string): string {
 }
 
 async function main(): Promise<void> {
-  const artipodDir = path.resolve(args.db);
-  await startMcpServer(artipodDir);
+  const footnoteDir = path.resolve(args.db);
+  await startMcpServer(footnoteDir);
 }
 
 /**
- * Start the MCP server for the given artipod directory.
+ * Start the MCP server for the given footnote index directory.
  * Can be called from main.ts or run standalone.
  */
 export async function startMcpServer(dbPath: string): Promise<void> {
@@ -110,14 +110,14 @@ export async function startMcpServer(dbPath: string): Promise<void> {
  * Exported for testing with InMemoryTransport.
  */
 export async function createMcpServer(dbPath: string): Promise<McpServer> {
-  const artipodDir = path.resolve(dbPath);
-  const indexPath = path.join(artipodDir, 'index.sqlite');
-  const manifestPath = path.join(artipodDir, 'manifest.json');
+  const footnoteDir = path.resolve(dbPath);
+  const indexPath = path.join(footnoteDir, 'index.sqlite');
+  const manifestPath = path.join(footnoteDir, 'manifest.json');
 
-  // Validate artipod exists
+  // Validate index exists
   if (!fs.existsSync(indexPath)) {
     process.stderr.write(`Error: Index not found at ${indexPath}\n`);
-    process.stderr.write(`Run 'docidx build' first to create an artipod.\n`);
+    process.stderr.write(`Run 'docidx build' first to create a footnote index.\n`);
     process.exit(1);
   }
 
@@ -155,7 +155,7 @@ export async function createMcpServer(dbPath: string): Promise<McpServer> {
 
   // Check if content copy exists for grep
   const contentCopyDir = manifest.content_copy?.enabled
-    ? path.join(artipodDir, manifest.content_copy.path)
+    ? path.join(footnoteDir, manifest.content_copy.path)
     : null;
   const hasGrepSupport = contentCopyDir && fs.existsSync(contentCopyDir);
 
@@ -169,11 +169,11 @@ export async function createMcpServer(dbPath: string): Promise<McpServer> {
 
   server.resource(
     'manifest',
-    'artipod://manifest',
-    { description: `Build manifest for the ${projectName} artipod` },
+    'footnote://manifest',
+    { description: `Build manifest for the ${projectName} footnote index` },
     async () => ({
       contents: [{
-        uri: 'artipod://manifest',
+        uri: 'footnote://manifest',
         mimeType: 'application/json',
         text: JSON.stringify(manifest, null, 2)
       }]
@@ -332,7 +332,7 @@ export async function createMcpServer(dbPath: string): Promise<McpServer> {
     const grepDir = contentCopyDir;
     server.tool(
       'search_grep',
-      'Search documentation content files using grep. Supports regex patterns. Only available when content files are copied to the artipod.',
+      'Search documentation content files using grep. Supports regex patterns. Only available when content files are copied to the footnote index.',
       {
         pattern: z.string().describe('Grep pattern (supports basic regex)'),
         max_results: z.number().int().min(1).max(50).default(20).describe('Maximum number of matching lines')
@@ -350,7 +350,7 @@ export async function createMcpServer(dbPath: string): Promise<McpServer> {
             };
           }
 
-          // Strip the artipod content prefix from paths for readability
+          // Strip the index content prefix from paths for readability
           const cleaned = result.replace(new RegExp(grepDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/', 'g'), '');
 
           return {
@@ -380,11 +380,11 @@ export async function createMcpServer(dbPath: string): Promise<McpServer> {
     'Incrementally update the documentation index. Only processes files that changed since the last build. Safe to run frequently.',
     {
       root: z.string().optional().describe('Project root directory (auto-detected if not specified)'),
-      copy_content: z.boolean().default(false).describe('Copy markdown files to artipod for grep search')
+      copy_content: z.boolean().default(false).describe('Copy markdown files to footnote index for grep search')
     },
     async ({ root, copy_content }) => {
       try {
-        const buildArgs = ['build', '--out', artipodDir];
+        const buildArgs = ['build', '--out', footnoteDir];
         if (root) buildArgs.push('--root', root);
         if (copy_content) buildArgs.push('--copy-content');
 
@@ -415,11 +415,11 @@ export async function createMcpServer(dbPath: string): Promise<McpServer> {
     'Completely rebuild the documentation index from scratch. Use when the index is corrupted or the embedding model changed. This is slower than build_index.',
     {
       root: z.string().optional().describe('Project root directory (auto-detected if not specified)'),
-      copy_content: z.boolean().default(false).describe('Copy markdown files to artipod for grep search')
+      copy_content: z.boolean().default(false).describe('Copy markdown files to footnote index for grep search')
     },
     async ({ root, copy_content }) => {
       try {
-        const buildArgs = ['build', '--clean', '--out', artipodDir];
+        const buildArgs = ['build', '--clean', '--out', footnoteDir];
         if (root) buildArgs.push('--root', root);
         if (copy_content) buildArgs.push('--copy-content');
 

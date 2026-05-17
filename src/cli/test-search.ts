@@ -26,7 +26,7 @@ async function runSearch(
   mode: SearchMode, 
   embedder: Embedder, 
   store: SqliteStore,
-  artipodDir: string
+  footnoteDir: string
 ): Promise<void> {
   let results: Array<{
     chunk_id: string;
@@ -44,7 +44,7 @@ async function runSearch(
 
   if (mode === 'grep') {
     // Grep search on raw files
-    const contentDir = path.join(artipodDir, 'content');
+    const contentDir = path.join(footnoteDir, 'content');
     if (!fs.existsSync(contentDir)) {
       console.log('\n❌ Content files not found. Rebuild with --copy-content to enable grep search.\n');
       return;
@@ -201,22 +201,22 @@ const args = minimist(process.argv.slice(2), {
 const cliQuery = args.query || args.q || args._[0] || null;
 
 async function main(): Promise<void> {
-  // Auto-detect artipod directory from project config if not specified
-  let artipodDir = args.db;
-  if (!artipodDir) {
+  // Auto-detect footnote index directory from project config if not specified
+  let footnoteDir = args.db;
+  if (!footnoteDir) {
     const { config } = await loadProjectConfig(process.cwd());
     const projectRoot = resolveContentRoot(config, process.cwd());
-    artipodDir = path.join(projectRoot, 'artipod');
+    footnoteDir = path.join(projectRoot, '.footnote');
     
     // Fallback to current directory
-    if (!fs.existsSync(artipodDir)) {
-      artipodDir = './artipod';
+    if (!fs.existsSync(footnoteDir)) {
+      footnoteDir = './.footnote';
     }
   }
   
-  artipodDir = path.resolve(artipodDir);
-  const indexPath = path.join(artipodDir, 'index.sqlite');
-  const manifestPath = path.join(artipodDir, 'manifest.json');
+  footnoteDir = path.resolve(footnoteDir);
+  const indexPath = path.join(footnoteDir, 'index.sqlite');
+  const manifestPath = path.join(footnoteDir, 'manifest.json');
 
   // Validate paths
   if (!fs.existsSync(indexPath)) {
@@ -261,7 +261,7 @@ async function main(): Promise<void> {
   // If query provided on command line, run once and exit
   if (cliQuery) {
     console.log(`\n🔍 Search: "${cliQuery}" (mode: ${mode.toUpperCase()})`);
-    await runSearch(cliQuery, mode, embedder, store, artipodDir);
+    await runSearch(cliQuery, mode, embedder, store, footnoteDir);
     store.close();
     process.exit(0);
   }
@@ -272,7 +272,7 @@ async function main(): Promise<void> {
   console.log(`   Mode: ${mode.toUpperCase()}`);
   
   // Check if grep is available
-  const contentDir = path.join(artipodDir, 'content');
+  const contentDir = path.join(footnoteDir, 'content');
   if (fs.existsSync(contentDir)) {
     console.log(`   Grep: available (${contentDir})`);
   }
@@ -304,7 +304,7 @@ async function main(): Promise<void> {
       }
 
       try {
-        await runSearch(query, mode, embedder, store, artipodDir);
+        await runSearch(query, mode, embedder, store, footnoteDir);
         console.log('─'.repeat(60) + '\n');
       } catch (error) {
         console.error(`\n❌ Search error: ${error instanceof Error ? error.message : error}\n`);

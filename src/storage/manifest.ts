@@ -1,7 +1,7 @@
 /**
  * Manifest Generator
  * 
- * Creates manifest.json with build metadata for the artipod.
+ * Creates manifest.json with build metadata for the footnote index.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -19,7 +19,6 @@ export interface ManifestData {
   project_name?: string;
   build_time_utc: string;
   source_git_commit: string | null;
-  content_root: string;
   base_url?: string;  // Base URL for document links (e.g., 'https://docs.enterprisehealth.com/')
   chunking: {
     max_tokens: number;
@@ -37,7 +36,7 @@ export interface ManifestData {
   filters?: Record<string, string>;  // Active filters (e.g., { brand: 'eh' })
   content_copy?: {
     enabled: boolean;
-    path: string;  // Relative path within artipod (e.g., 'content')
+    path: string;  // Relative path within index directory (e.g., 'content')
   };
   agent?: AgentConfig;
 }
@@ -45,10 +44,10 @@ export interface ManifestData {
 /**
  * Get current git commit hash if available
  */
-function getGitCommit(repoPath: string): string | null {
+function getGitCommit(): string | null {
   try {
     const result = execSync('git rev-parse HEAD', {
-      cwd: repoPath,
+      cwd: process.cwd(),
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -88,7 +87,6 @@ After gathering enough information, synthesize a clear answer with citations lik
 
 export function generateManifest(options: {
   projectName?: string;
-  contentRoot: string;
   baseUrl?: string;  // Base URL for document links
   maxTokens: number;
   overlap: number;
@@ -106,8 +104,7 @@ export function generateManifest(options: {
     schema_version: '1.1.0',
     project_name: options.projectName,
     build_time_utc: new Date().toISOString(),
-    source_git_commit: getGitCommit(options.contentRoot),
-    content_root: options.contentRoot,
+    source_git_commit: getGitCommit(),
     base_url: options.baseUrl,
     chunking: {
       max_tokens: options.maxTokens,

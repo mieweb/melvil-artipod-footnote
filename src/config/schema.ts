@@ -71,7 +71,7 @@ export interface DocidxConfig {
   content?: {
     /** Root directory (default: auto-detect) */
     root?: string;
-    /** Content subdirectory (default: 'content') */
+    /** Content subdirectory (default: '.' i.e. the root itself) */
     dir?: string;
     /** File patterns to include */
     include?: string[];
@@ -113,12 +113,12 @@ export interface DocidxConfig {
  */
 export const DEFAULT_CONFIG: DocidxConfig = {
   content: {
-    dir: 'content',
+    dir: '.',
     include: ['**/*.md'],
     exclude: ['**/node_modules/**']
   },
   shortcodes: {
-    // Common Hugo shortcodes
+    // Common shortcodes
     'info': { extractContent: true },
     'note': { extractContent: true },
     'tip': { extractContent: true },

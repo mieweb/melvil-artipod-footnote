@@ -44,9 +44,9 @@ export interface QueryResult {
  * Run a hybrid query against the index
  */
 export async function queryIndex(options: QueryOptions): Promise<QueryResult[]> {
-  const artipodDir = path.resolve(options.dbPath);
-  const indexPath = path.join(artipodDir, 'index.sqlite');
-  const manifestPath = path.join(artipodDir, 'manifest.json');
+  const footnoteDir = path.resolve(options.dbPath);
+  const indexPath = path.join(footnoteDir, 'index.sqlite');
+  const manifestPath = path.join(footnoteDir, 'manifest.json');
 
   // Validate paths
   if (!fs.existsSync(indexPath)) {

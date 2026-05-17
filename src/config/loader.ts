@@ -84,17 +84,6 @@ export function resolveContentRoot(config: DocidxConfig, workingDir: string): st
     return path.resolve(workingDir, config.content.root);
   }
   
-  // Auto-detect by looking for content/ directory
-  let dir = path.resolve(workingDir);
-  for (let i = 0; i < 10; i++) {
-    const contentDir = path.join(dir, config.content?.dir || 'content');
-    if (fs.existsSync(contentDir)) {
-      return dir;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  
-  return workingDir;
+  // Default to the current working directory
+  return path.resolve(workingDir);
 }

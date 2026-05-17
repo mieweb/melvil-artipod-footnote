@@ -1,7 +1,7 @@
 /**
  * Index Builder
  * 
- * Main orchestration for building the SQLite hybrid index from Hugo/markdown content.
+ * Main orchestration for building the SQLite hybrid index from markdown content.
  * Uses sqlite-vec for vector search and FTS5 for BM25 full-text search.
  */
 import * as path from 'path';
@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import { createLogger, format, transports } from 'winston';
 import { createHash } from 'crypto';
 
-import { parseFrontMatter, parseMarkdown } from '../parser/hugo.js';
+import { parseFrontMatter, parseMarkdown } from '../parser/markdown.js';
 import { processShortcodes, shouldIncludeDocument } from '../parser/transform.js';
 import { chunkDocument, hashContent, type Chunk } from '../chunker/chunker.js';
 import { createEmbedder, type Embedder } from '../embedder/embedder.js';
@@ -41,7 +41,7 @@ export interface BuildOptions {
   maxTokens: number;
   overlap: number;
   compress: boolean;
-  copyContent: boolean;  // Copy source files to artipod for grep search
+  copyContent: boolean;  // Copy source files to footnote index for grep search
   config: DocidxConfig;  // Project configuration
 }
 
@@ -94,27 +94,27 @@ function copyContentDir(src: string, dest: string): void {
  * Build or update the index
  */
 export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
-  const hugoRoot = path.resolve(options.root);
-  const contentDir = path.join(hugoRoot, options.content);
-  const artipodDir = path.resolve(options.out);
+  const projectRoot = path.resolve(options.root);
+  const contentDir = path.join(projectRoot, options.content);
+  const footnoteDir = path.resolve(options.out);
   
   // Validate paths
-  if (!fs.existsSync(hugoRoot)) {
-    throw new Error(`Hugo root not found: ${hugoRoot}`);
+  if (!fs.existsSync(projectRoot)) {
+    throw new Error(`Project root not found: ${projectRoot}`);
   }
   if (!fs.existsSync(contentDir)) {
     throw new Error(`Content directory not found: ${contentDir}`);
   }
 
   // Ensure output directories
-  ensureDir(artipodDir);
-  const indexPath = path.join(artipodDir, 'index.sqlite');
-  const manifestPath = path.join(artipodDir, 'manifest.json');
+  ensureDir(footnoteDir);
+  const indexPath = path.join(footnoteDir, 'index.sqlite');
+  const manifestPath = path.join(footnoteDir, 'manifest.json');
 
   // Copy content files if requested (for grep-based search comparison)
-  const contentCopyDir = path.join(artipodDir, 'content');
+  const contentCopyDir = path.join(footnoteDir, 'content');
   if (options.copyContent) {
-    logger.info('Copying content files to artipod for grep search...');
+    logger.info('Copying content files to footnote index for grep search...');
     copyContentDir(contentDir, contentCopyDir);
     logger.info(`Content copied to ${contentCopyDir}`);
   }
@@ -126,8 +126,8 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
     dimension: options.embeddingDim
   });
   
-  // Initialize embedding cache in the artipod directory
-  const embeddingCache = createEmbeddingCache(artipodDir, embedder.modelId);
+  // Initialize embedding cache in the footnote index directory
+  const embeddingCache = createEmbeddingCache(footnoteDir, embedder.modelId);
 
   try {
     // Check for dimension mismatch
@@ -360,7 +360,6 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
     // Write manifest
     const manifest = generateManifest({
       projectName: options.config.name,
-      contentRoot: options.content,
       baseUrl: options.config.baseUrl,
       maxTokens: options.maxTokens,
       overlap: options.overlap,

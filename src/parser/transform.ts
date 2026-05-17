@@ -2,12 +2,12 @@
  * Content Transformer
  * 
  * Processes markdown content using configuration-driven shortcode rules.
- * This replaces the hardcoded hugo.ts shortcode handling.
+ * This replaces the hardcoded markdown.ts shortcode handling.
  */
 import type { ShortcodeRule, TransformContext, DocidxConfig } from '../config/schema.js';
 
 /**
- * Process Hugo shortcodes using configured rules
+ * Process shortcodes using configured rules
  */
 export function processShortcodes(
   content: string, 

@@ -10,7 +10,7 @@
 
 **FOOTNOTE** — *From Ozwell Only: Traceable Notes & Observations in Text Evidence*
 
-FOOTNOTE is a portable index format within [Artipods](ARTIPOD-README.md) designed for RAG (Retrieval-Augmented Generation) with proper citations. It compiles markdown documentation into a self-contained SQLite database that combines:
+FOOTNOTE is a portable index format within [Footnote Indexes](FOOTNOTE-FORMAT.md) designed for RAG (Retrieval-Augmented Generation) with proper citations. It compiles markdown documentation into a self-contained SQLite database that combines:
 
 - **sqlite-vec** for semantic vector search (find conceptually similar content)
 - **FTS5** for full-text BM25 search (find exact keywords and phrases)
@@ -30,7 +30,7 @@ Melvil features:
 
 ## Overview
 
-This tool (docidx) is a markdown compiler that produces FOOTNOTE-enabled Artipods for server-side RAG consumption. 
+This tool (docidx) is a markdown compiler that produces FOOTNOTE-enabled indexes for server-side RAG consumption. 
 
 See https://alexgarcia.xyz/sqlite-vec/wasm.html for in browser example
 
@@ -67,9 +67,9 @@ npm run docidx -- build --embedding-model text-embedding-3-small
 
 ### Options
 
-- `--root <path>` - Hugo project root (auto-detected by finding content/ directory)
-- `--content <path>` - Content directory relative to root (default: content)
-- `--out <path>` - Output artipod directory (default: ./artipod relative to Hugo root)
+- `--root <path>` - Project root (auto-detected by finding content/ directory)
+- `--content <path>` - Content directory relative to root (default: `.` i.e. the root itself)
+- `--out <path>` - Output directory (default: ./.footnote relative to project root)
 - `--clean` - Remove existing index and rebuild from scratch
 - `--incremental` - Only process changed files
 - `--include-drafts` - Include draft documents
@@ -79,10 +79,10 @@ npm run docidx -- build --embedding-model text-embedding-3-small
 - `--pull` - Automatically pull Ollama model if not installed
 - `--max-tokens <n>` - Max tokens per chunk (default: 500)
 - `--overlap <n>` - Token overlap between chunks (default: 80)
-- `--copy-content` - Copy markdown files to artipod for grep-based search
+- `--copy-content` - Copy markdown files to footnote index for grep-based search
 
 **Auto-detection behavior:**
-- **Hugo root**: Walks up from current directory looking for `content/`
+- **Project root**: Walks up from current directory looking for `content/`
 - **Build mode**: Incremental if index exists, clean if not
 - **Embedder**: Checks in order:
   1. **Ollama** (if running locally with embedding model like `nomic-embed-text`)
@@ -146,7 +146,7 @@ The agent has access to these tools:
 
 ### Web Server (API POC)
 
-The ask agent includes a built-in HTTP server that demonstrates how external applications can consume an artipod. This serves as a **proof of concept** for building documentation assistants, chatbots, or search interfaces.
+The ask agent includes a built-in HTTP server that demonstrates how external applications can consume a footnote index. This serves as a **proof of concept** for building documentation assistants, chatbots, or search interfaces.
 
 ```bash
 ./docidx.sh ask --serve --port 3000              # Start server
@@ -155,10 +155,10 @@ The ask agent includes a built-in HTTP server that demonstrates how external app
 
 ### MCP Server (Model Context Protocol)
 
-The MCP server exposes artipod search tools to AI assistants like VS Code Copilot, Claude Desktop, and Cursor. Unlike the HTTP server + ask agent, the MCP server provides **tools, not answers** — the client's LLM decides which tools to call and synthesizes the response.
+The MCP server exposes footnote index search tools to AI assistants like VS Code Copilot, Claude Desktop, and Cursor. Unlike the HTTP server + ask agent, the MCP server provides **tools, not answers** — the client's LLM decides which tools to call and synthesizes the response.
 
 ```bash
-docidx mcp --db ./artipod                        # Start MCP server (stdio)
+docidx mcp --db ./.footnote                      # Start MCP server (stdio)
 ```
 
 **Available MCP tools:** `search_hybrid`, `search_fts`, `search_literal`, `read_document`, `find_related`, `list_documents`, `search_grep` (if `--copy-content` was used at build time), `build_index` (incremental update), `rebuild_index` (clean rebuild).
@@ -170,7 +170,7 @@ docidx mcp --db ./artipod                        # Start MCP server (stdio)
     "servers": {
       "docidx": {
         "command": "npx",
-        "args": ["docidx", "mcp", "--db", "/path/to/artipod"]
+        "args": ["docidx", "mcp", "--db", "/path/to/.footnote"]
       }
     }
   }
@@ -183,7 +183,7 @@ docidx mcp --db ./artipod                        # Start MCP server (stdio)
   "mcpServers": {
     "docidx": {
       "command": "npx",
-      "args": ["docidx", "mcp", "--db", "/path/to/artipod"]
+      "args": ["docidx", "mcp", "--db", "/path/to/.footnote"]
     }
   }
 }
@@ -229,7 +229,7 @@ data: [DONE]
 
 **Building Your Own Client:**
 
-The artipod is designed to be consumed by any application that can:
+The footnote index is designed to be consumed by any application that can:
 1. Read SQLite (for direct search access)
 2. Call an embedding API (Ollama/OpenAI) for vector queries
 3. Optionally, wrap an LLM for agentic search
@@ -308,19 +308,19 @@ To enable grep-based search (for comparison or fallback):
 ./docidx.sh build --copy-content
 ```
 
-This copies markdown files to `artipod/content/` (~3MB for 1000 docs).
+This copies markdown files to `.footnote/content/` (~3MB for 1000 docs).
 
 ## Environment Variables
 
 - `OPENAI_API_KEY` - Required only if using OpenAI embeddings (not needed for Ollama)
 - `LOG_LEVEL` - Logging verbosity (debug, info, warn, error)
 
-## Artipod Structure
+## Footnote Index Structure
 
-See [ARTIPOD-README.md](ARTIPOD-README.md) for the full specification.
+See [FOOTNOTE-FORMAT.md](FOOTNOTE-FORMAT.md) for the full specification.
 
 ```
-artipod/
+.footnote/
 ├── index.sqlite           # SQLite database (vectors + FTS)
 ├── manifest.json          # Build metadata and configuration
 ├── .embed-{model}/        # Embedding cache (e.g., .embed-nomic-embed-text)
@@ -333,7 +333,7 @@ artipod/
 
 The `.embed-{model}` folder caches embeddings by content hash to avoid re-vectorizing unchanged chunks across builds. This provides significant speedups for incremental builds where only a few documents change.
 
-- **Location**: `{artipod}/.embed-{model}` (e.g., `.embed-nomic-embed-text`)
+- **Location**: `{.footnote}/.embed-{model}` (e.g., `.embed-nomic-embed-text`)
 - **Format**: Binary Float32Array files (~3KB per 768-dim embedding)
 - **Organization**: Files are stored in subdirectories by 2-char hash prefix (e.g., `ab/cdef1234.bin`) to avoid slow directory listings when cache contains tens of thousands of entries
 - **Benefits**: 
@@ -356,7 +356,7 @@ The cache is model-specific, so switching embedding models creates a new cache f
 ### manifest.json
 
 Contains:
-- `schema_version` - Artipod schema version
+- `schema_version` - Footnote format schema version
 - `build_time_utc` - Build timestamp
 - `source_git_commit` - Git commit hash (if available)
 - `chunking` - Chunking parameters (max_tokens, overlap)
@@ -369,7 +369,7 @@ Contains:
 
 ```bash
 # Run with tsx for development
-npm run docidx -- build --root ../.. --content content --out ./artipod --clean --embedding-model mock
+npm run docidx -- build --root ../.. --content content --out ./.footnote --clean --embedding-model mock
 
 # Build TypeScript
 npm run build
