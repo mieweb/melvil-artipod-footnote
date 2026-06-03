@@ -120,7 +120,6 @@ async function ask() {
   if (!question) return;
   
   askBtn.disabled = true;
-  if (examplesEl) examplesEl.hidden = true;
   output.innerHTML = '<div class="status">Thinking...</div>';
   
   let answer = '';
