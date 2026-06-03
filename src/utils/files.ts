@@ -4,7 +4,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-const INDEXABLE_EXTENSIONS = new Set(['.md', '.txt', '.pdf', '.docx']);
+const INDEXABLE_EXTENSIONS = new Set(['.md', '.txt', '.pdf', '.docx', '.xml']);
 
 /**
  * Recursively find all indexable files (.md, .txt, .pdf) in a directory

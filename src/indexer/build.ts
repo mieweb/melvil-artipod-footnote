@@ -12,6 +12,7 @@ import { createHash } from 'crypto';
 import { parseFrontMatter, parseMarkdown, parseAsPlainText } from '../parser/markdown.js';
 import { parsePdf } from '../parser/pdf.js';
 import { parseDocx } from '../parser/docx.js';
+import { parseJats } from '../parser/jats.js';
 import { processShortcodes, shouldIncludeDocument } from '../parser/transform.js';
 import { chunkDocument, hashContent, type Chunk } from '../chunker/chunker.js';
 import { createEmbedder, type Embedder } from '../embedder/embedder.js';
@@ -83,7 +84,7 @@ function copyContentDir(src: string, dest: string): void {
         }
         fs.mkdirSync(destPath, { recursive: true });
         copyRecursive(srcPath, destPath);
-      } else if (['.md', '.txt', '.pdf', '.docx'].includes(path.extname(entry.name).toLowerCase())) {
+      } else if (['.md', '.txt', '.pdf', '.docx', '.xml'].includes(path.extname(entry.name).toLowerCase())) {
         fs.copyFileSync(srcPath, destPath);
       }
     }
@@ -207,13 +208,17 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
       if (ext === '.pdf') {
         // PDF: async text extraction, no front matter or shortcodes
         const pdfBuffer = fs.readFileSync(path.join(contentDir, relativePath));
-        ({ headings, sections } = await parsePdf(pdfBuffer));      } else if (ext === '.docx') {
-        // DOCX: extract plain text, no front matter or shortcodes
-        const docxBuffer = fs.readFileSync(path.join(contentDir, relativePath));
-        ({ headings, sections } = await parseDocx(docxBuffer));      } else if (ext === '.docx') {
+        ({ headings, sections } = await parsePdf(pdfBuffer));
+      } else if (ext === '.docx') {
         // DOCX: extract plain text, no front matter or shortcodes
         const docxBuffer = fs.readFileSync(path.join(contentDir, relativePath));
         ({ headings, sections } = await parseDocx(docxBuffer));
+      } else if (ext === '.xml') {
+        // JATS XML: lift bibliographic metadata into front matter, render body
+        ({ frontMatter, headings, sections } = parseJats(rawContent));
+        if (!shouldIncludeDocument(frontMatter, options.config, options.filters)) {
+          continue;
+        }
       } else if (ext === '.txt') {
         // Plain text: no front matter or shortcodes
         ({ headings, sections } = parseAsPlainText(rawContent));
