@@ -121,6 +121,8 @@ async function ask() {
   
   askBtn.disabled = true;
   output.innerHTML = '<div class="status">Thinking...</div>';
+  // Scroll to the top so the answer is visible as it streams in.
+  window.scrollTo({ top: 0, behavior: 'smooth' });
   
   let answer = '';
   let references = [];
