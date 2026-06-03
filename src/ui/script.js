@@ -365,6 +365,18 @@ function formatAnswer(text, references) {
   cleaned = cleaned.replace(/\[(\d+)\](?!\()/g, (match, num) => {
     return '<a href="#ref-' + num + '" class="citation-link" title="Jump to reference ' + num + '">[' + num + ']</a>';
   });
+
+  // Some models emit citations as (1) instead of [1]. Linkify those too, but
+  // only when we know the reference count, and only for numbers within range,
+  // to avoid turning ordinary parentheticals like "(2)" into bogus links.
+  const refCount = Array.isArray(references) ? references.length : 0;
+  if (refCount > 0) {
+    cleaned = cleaned.replace(/\((\d+)\)/g, (match, num) => {
+      const n = parseInt(num, 10);
+      if (n < 1 || n > refCount) return match;
+      return '<a href="#ref-' + n + '" class="citation-link" title="Jump to reference ' + n + '">[' + n + ']</a>';
+    });
+  }
   
   // Use marked.js for markdown rendering
   if (typeof marked !== 'undefined') {
