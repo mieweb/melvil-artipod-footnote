@@ -24,12 +24,13 @@ import { readManifest, DEFAULT_SYSTEM_PROMPT, ManifestData } from '../storage/ma
 import { loadProjectConfig, resolveContentRoot } from '../config/index.js';
 
 const args = minimist(process.argv.slice(2), {
-  string: ['db', 'model', 'port'],
+  string: ['db', 'model', 'port', 'examples'],
   boolean: ['verbose', 'interactive', 'chunks', 'serve'],
   alias: { v: 'verbose', i: 'interactive', c: 'chunks', s: 'serve', p: 'port' },
   default: {
     db: '',  // Empty = auto-detect from project root
     model: '',  // Empty = use manifest default or fallback
+    examples: '',  // Optional HTML file served at /example (suggested questions)
     verbose: false,
     interactive: false,
     chunks: false,  // Show full chunk content
@@ -1480,6 +1481,8 @@ interface AppContext {
   maxIterations: number;
   footnoteDir: string;
   verbose: boolean;
+  /** Optional path to an HTML page served at /example (suggested questions). */
+  examplesFile?: string;
 }
 
 async function initializeApp(): Promise<AppContext> {
@@ -1561,7 +1564,9 @@ async function initializeApp(): Promise<AppContext> {
 
   store.init(false);
 
-  return { embedder, store, manifest, agentModel, maxIterations, footnoteDir, verbose: args.verbose };
+  const examplesFile = args.examples ? path.resolve(args.examples) : undefined;
+
+  return { embedder, store, manifest, agentModel, maxIterations, footnoteDir, verbose: args.verbose, examplesFile };
 }
 
 /**
@@ -1666,6 +1671,24 @@ async function startServer(app: AppContext, port: number): Promise<void> {
       return;
     }
 
+    // Optional example/benchmark questions page (provided via --examples <file>).
+    if (url.pathname === '/example' && req.method === 'GET') {
+      if (app.examplesFile && fs.existsSync(app.examplesFile)) {
+        try {
+          const content = fs.readFileSync(app.examplesFile, 'utf-8');
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(content);
+        } catch {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Error loading examples page');
+        }
+      } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('No examples page configured. Start the server with --examples <file>.');
+      }
+      return;
+    }
+
     // Document tree browser
     if (url.pathname === '/browse' && req.method === 'GET') {
       const docs = app.store.listDocuments();
@@ -1760,7 +1783,8 @@ async function startServer(app: AppContext, port: number): Promise<void> {
         docCount: app.manifest.doc_count,
         chunkCount: app.manifest.chunk_count,
         model: app.agentModel,
-        baseUrl: app.manifest.base_url || ''
+        baseUrl: app.manifest.base_url || '',
+        hasExamples: !!(app.examplesFile && fs.existsSync(app.examplesFile))
       }));
       return;
     }

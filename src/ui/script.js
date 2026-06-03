@@ -13,7 +13,8 @@ async function loadStats() {
   try {
     const response = await fetch('/health');
     const data = await response.json();
-    stats.innerHTML = `${data.docCount} docs, ${data.chunkCount} chunks | Model: ${data.model} | <a href="/browse">Browse</a>`;
+    const examplesLink = data.hasExamples ? ' | <a href="/example">Examples</a>' : '';
+    stats.innerHTML = `${data.docCount} docs, ${data.chunkCount} chunks | Model: ${data.model} | <a href="/browse">Browse</a>${examplesLink}`;
     // Store baseUrl for constructing document links
     baseUrl = data.baseUrl || '';
   } catch (e) {
@@ -339,3 +340,11 @@ function formatAnswer(text, references) {
 
 // Initialize
 loadStats();
+
+// Deep-link support: /?q=... pre-fills the box and runs the question.
+// Enables single-click example/benchmark links from external pages.
+const presetQuestion = new URLSearchParams(window.location.search).get('q');
+if (presetQuestion) {
+  input.value = presetQuestion;
+  ask();
+}
