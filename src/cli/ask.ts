@@ -17,6 +17,7 @@ import * as crypto from 'crypto';
 import { execSync } from 'child_process';
 import minimist from 'minimist';
 import { marked } from 'marked';
+import yaml from 'js-yaml';
 
 import { createEmbedder, Embedder } from '../embedder/embedder.js';
 import { SqliteStore } from '../storage/sqlite.js';
@@ -1481,8 +1482,45 @@ interface AppContext {
   maxIterations: number;
   footnoteDir: string;
   verbose: boolean;
-  /** Optional path to an HTML page served at /example (suggested questions). */
-  examplesFile?: string;
+  /** Optional suggested questions (from --examples <yaml>) shown on the main page. */
+  examples?: ExampleQuestion[];
+}
+
+/** A suggested question shown below the ask box. */
+interface ExampleQuestion {
+  /** The question text submitted when clicked. */
+  question: string;
+  /** Optional short topic/category label. */
+  topic?: string;
+}
+
+/**
+ * Load suggested questions from a YAML file.
+ *
+ * Accepts either a top-level list or an object with an `examples:`/`questions:`
+ * key. Each entry may be a plain string or an object with `question` and
+ * optional `topic`/`label`/`category`.
+ */
+function loadExamples(filePath: string): ExampleQuestion[] {
+  const raw = yaml.load(fs.readFileSync(filePath, 'utf-8'));
+  const list = Array.isArray(raw)
+    ? raw
+    : (raw as any)?.examples ?? (raw as any)?.questions ?? [];
+  if (!Array.isArray(list)) return [];
+
+  const examples: ExampleQuestion[] = [];
+  for (const item of list) {
+    if (typeof item === 'string') {
+      const q = item.trim();
+      if (q) examples.push({ question: q });
+    } else if (item && typeof item === 'object') {
+      const question = String(item.question ?? item.q ?? '').trim();
+      if (!question) continue;
+      const topic = item.topic ?? item.label ?? item.category;
+      examples.push(topic ? { question, topic: String(topic) } : { question });
+    }
+  }
+  return examples;
 }
 
 async function initializeApp(): Promise<AppContext> {
@@ -1564,9 +1602,18 @@ async function initializeApp(): Promise<AppContext> {
 
   store.init(false);
 
-  const examplesFile = args.examples ? path.resolve(args.examples) : undefined;
+  let examples: ExampleQuestion[] | undefined;
+  if (args.examples) {
+    const examplesPath = path.resolve(args.examples);
+    try {
+      examples = loadExamples(examplesPath);
+      if (verbose) console.log(`   Examples:  ${examples.length} from ${examplesPath}`);
+    } catch (err) {
+      console.warn(`⚠️  Could not load examples from ${examplesPath}: ${(err as Error).message}`);
+    }
+  }
 
-  return { embedder, store, manifest, agentModel, maxIterations, footnoteDir, verbose: args.verbose, examplesFile };
+  return { embedder, store, manifest, agentModel, maxIterations, footnoteDir, verbose: args.verbose, examples };
 }
 
 /**
@@ -1671,21 +1718,11 @@ async function startServer(app: AppContext, port: number): Promise<void> {
       return;
     }
 
-    // Optional example/benchmark questions page (provided via --examples <file>).
-    if (url.pathname === '/example' && req.method === 'GET') {
-      if (app.examplesFile && fs.existsSync(app.examplesFile)) {
-        try {
-          const content = fs.readFileSync(app.examplesFile, 'utf-8');
-          res.writeHead(200, { 'Content-Type': 'text/html' });
-          res.end(content);
-        } catch {
-          res.writeHead(500, { 'Content-Type': 'text/plain' });
-          res.end('Error loading examples page');
-        }
-      } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('No examples page configured. Start the server with --examples <file>.');
-      }
+    // Optional suggested questions (provided via --examples <yaml>), rendered
+    // on the main page below the ask box.
+    if (url.pathname === '/examples' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ examples: app.examples || [] }));
       return;
     }
 
@@ -1784,7 +1821,7 @@ async function startServer(app: AppContext, port: number): Promise<void> {
         chunkCount: app.manifest.chunk_count,
         model: app.agentModel,
         baseUrl: app.manifest.base_url || '',
-        hasExamples: !!(app.examplesFile && fs.existsSync(app.examplesFile))
+        hasExamples: !!(app.examples && app.examples.length > 0)
       }));
       return;
     }

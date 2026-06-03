@@ -4,6 +4,7 @@ const input = document.getElementById('question');
 const output = document.getElementById('output');
 const askBtn = document.getElementById('askBtn');
 const stats = document.getElementById('stats');
+const examplesEl = document.getElementById('examples');
 
 // Base URL for document links (loaded from manifest via /health)
 let baseUrl = '';
@@ -13,12 +14,52 @@ async function loadStats() {
   try {
     const response = await fetch('/health');
     const data = await response.json();
-    const examplesLink = data.hasExamples ? ' | <a href="/example">Examples</a>' : '';
-    stats.innerHTML = `${data.docCount} docs, ${data.chunkCount} chunks | Model: ${data.model} | <a href="/browse">Browse</a>${examplesLink}`;
+    stats.innerHTML = `${data.docCount} docs, ${data.chunkCount} chunks | Model: ${data.model} | <a href="/browse">Browse</a>`;
     // Store baseUrl for constructing document links
     baseUrl = data.baseUrl || '';
+    if (data.hasExamples) loadExamples();
   } catch (e) {
     stats.textContent = 'Unable to connect to server';
+  }
+}
+
+// Load suggested questions (from --examples <yaml>) and render below the ask box.
+async function loadExamples() {
+  try {
+    const response = await fetch('/examples');
+    const data = await response.json();
+    const items = (data && data.examples) || [];
+    if (!items.length) return;
+
+    examplesEl.innerHTML = '';
+    const heading = document.createElement('div');
+    heading.className = 'examples-heading';
+    heading.textContent = 'Try one of these questions';
+    examplesEl.appendChild(heading);
+
+    for (const item of items) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'example-chip';
+      if (item.topic) {
+        const topic = document.createElement('span');
+        topic.className = 'example-topic';
+        topic.textContent = item.topic;
+        btn.appendChild(topic);
+      }
+      const text = document.createElement('span');
+      text.className = 'example-text';
+      text.textContent = item.question;
+      btn.appendChild(text);
+      btn.addEventListener('click', () => {
+        input.value = item.question;
+        ask();
+      });
+      examplesEl.appendChild(btn);
+    }
+    examplesEl.hidden = false;
+  } catch (e) {
+    // Examples are optional; ignore load failures.
   }
 }
 
@@ -79,6 +120,7 @@ async function ask() {
   if (!question) return;
   
   askBtn.disabled = true;
+  if (examplesEl) examplesEl.hidden = true;
   output.innerHTML = '<div class="status">Thinking...</div>';
   
   let answer = '';

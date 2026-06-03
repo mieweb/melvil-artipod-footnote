@@ -27,7 +27,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && cp -r src/ui dist/ui",
+    "build": "tsc && rm -rf dist/ui && cp -r src/ui dist/ui",
     "prepublishOnly": "npm run build",
     "start": "tsx src/cli/main.ts",
     "serve": "npm run build && node dist/cli/ask.js --serve",

@@ -72,6 +72,54 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Suggested example questions shown below the ask box */
+.examples {
+  margin: -8px 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.examples-heading {
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  font-weight: 600;
+}
+
+.example-chip {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 0.95em;
+  background: #f6f8fa;
+  color: #1f2933;
+  border: 1px solid #e1e4e8;
+  border-left: 4px solid #007bff;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.example-chip:hover {
+  background: #eef4fb;
+}
+
+.example-topic {
+  display: block;
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #0056b3;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.example-text {
+  display: block;
+}
+
 #output {
   background: white;
   border-radius: 8px;
