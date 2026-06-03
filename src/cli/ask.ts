@@ -18,6 +18,7 @@ import { execSync } from 'child_process';
 import minimist from 'minimist';
 import { marked } from 'marked';
 import yaml from 'js-yaml';
+import OpenAI from 'openai';
 
 import { createEmbedder, Embedder } from '../embedder/embedder.js';
 import { SqliteStore } from '../storage/sqlite.js';
@@ -25,7 +26,7 @@ import { readManifest, DEFAULT_SYSTEM_PROMPT, ManifestData } from '../storage/ma
 import { loadProjectConfig, resolveContentRoot } from '../config/index.js';
 
 const args = minimist(process.argv.slice(2), {
-  string: ['db', 'model', 'port', 'examples'],
+  string: ['db', 'model', 'port', 'examples', 'host'],
   boolean: ['verbose', 'interactive', 'chunks', 'serve'],
   alias: { v: 'verbose', i: 'interactive', c: 'chunks', s: 'serve', p: 'port' },
   default: {
@@ -36,7 +37,8 @@ const args = minimist(process.argv.slice(2), {
     interactive: false,
     chunks: false,  // Show full chunk content
     serve: false,
-    port: '3000'
+    port: '3000',
+    host: '127.0.0.1'  // Bind to localhost by default; override with --host 0.0.0.0
   }
 });
 
@@ -755,12 +757,80 @@ function cleanResponse(text: string): string {
 }
 
 /**
- * Call Ollama for chat completion (non-streaming)
+ * Detect whether a model name refers to an OpenAI chat model (gpt-*, o1/o3/o4
+ * reasoning models, or chatgpt-*). Ollama models are anything else.
+ */
+function isOpenAIModel(model: string): boolean {
+  return /^(gpt-|o[0-9]|chatgpt)/i.test(model);
+}
+
+let openaiChatClient: OpenAI | null = null;
+function getOpenAIChatClient(): OpenAI {
+  if (!openaiChatClient) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY is required to use an OpenAI chat model');
+    }
+    openaiChatClient = new OpenAI({ apiKey, baseURL: process.env.OPENAI_BASE_URL });
+  }
+  return openaiChatClient;
+}
+
+/**
+ * Call OpenAI for chat completion (non-streaming).
+ * Note: newer models (gpt-5, o-series) only accept the default temperature,
+ * so we don't send a custom temperature and use max_completion_tokens.
+ */
+async function chatOpenAI(
+  messages: Array<{ role: string; content: string }>,
+  model: string
+): Promise<string> {
+  const client = getOpenAIChatClient();
+  const completion = await client.chat.completions.create({
+    model,
+    messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
+    stream: false
+  });
+  return completion.choices[0]?.message?.content ?? '';
+}
+
+/**
+ * Call OpenAI with streaming - yields content deltas as they arrive.
+ */
+async function* chatStreamOpenAI(
+  messages: Array<{ role: string; content: string }>,
+  model: string
+): AsyncGenerator<string, string, unknown> {
+  const client = getOpenAIChatClient();
+  const stream = await client.chat.completions.create({
+    model,
+    messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
+    stream: true
+  });
+
+  let fullContent = '';
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content;
+    if (delta) {
+      fullContent += delta;
+      yield delta;
+    }
+  }
+  return fullContent;
+}
+
+/**
+ * Chat completion (non-streaming). Dispatches to OpenAI or Ollama based on the
+ * model name.
  */
 async function chat(
   messages: Array<{ role: string; content: string }>,
   model: string
 ): Promise<string> {
+  if (isOpenAIModel(model)) {
+    return chatOpenAI(messages, model);
+  }
+
   const response = await fetch('http://localhost:11434/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -784,12 +854,17 @@ async function chat(
 }
 
 /**
- * Call Ollama with streaming - yields tokens as they arrive
+ * Chat completion with streaming - yields tokens as they arrive. Dispatches to
+ * OpenAI or Ollama based on the model name.
  */
 async function* chatStream(
   messages: Array<{ role: string; content: string }>,
   model: string
 ): AsyncGenerator<string, string, unknown> {
+  if (isOpenAIModel(model)) {
+    return yield* chatStreamOpenAI(messages, model);
+  }
+
   const response = await fetch('http://localhost:11434/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1570,8 +1645,14 @@ async function initializeApp(): Promise<AppContext> {
   }
   const embeddingDim = manifest.embedding.dimension;
 
-  // Determine agent model: CLI arg > manifest config > default
-  const agentModel = args.model || manifest.agent?.model || 'llama3.2';
+  // Determine agent model.
+  // Priority: CLI --model > OpenAI default (when a key is present) > manifest > Ollama fallback.
+  // When OPENAI_API_KEY is set, default answers to OpenAI (GPT-5) so the same
+  // key powers both embeddings and answer generation. Override the OpenAI model
+  // with OPENAI_CHAT_MODEL, or force any model with --model.
+  const openaiDefaultModel = process.env.OPENAI_CHAT_MODEL || 'gpt-5';
+  const agentModel = args.model
+    || (process.env.OPENAI_API_KEY ? openaiDefaultModel : (manifest.agent?.model || 'llama3.2'));
   const maxIterations = manifest.agent?.max_iterations || 5;
   
   // Determine prompt source
@@ -1581,7 +1662,7 @@ async function initializeApp(): Promise<AppContext> {
 
   if (verbose) {
     console.log(`\n🤖 Agent Configuration:`);
-    console.log(`   Model:          ${agentModel}${args.model ? ' (from CLI)' : manifest.agent?.model ? ' (from manifest)' : ' (default)'}`);
+    console.log(`   Model:          ${agentModel}${args.model ? ' (from CLI)' : process.env.OPENAI_API_KEY ? ' (OpenAI default)' : manifest.agent?.model ? ' (from manifest)' : ' (default)'}`);
     console.log(`   Max Iterations: ${maxIterations}`);
     console.log(`   Prompt:         ${promptSource}`);
     if (manifest.agent?.system_prompt) {
@@ -1673,7 +1754,7 @@ marked.use({
 /**
  * Start HTTP server for API access
  */
-async function startServer(app: AppContext, port: number): Promise<void> {
+async function startServer(app: AppContext, port: number, host: string = '127.0.0.1'): Promise<void> {
   const server = http.createServer(async (req, res) => {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -2217,8 +2298,9 @@ async function startServer(app: AppContext, port: number): Promise<void> {
   const debugDir = path.join(app.footnoteDir, 'debug');
   const cleanupTimer = startDebugCleanupTimer(debugDir, app.verbose);
 
-  server.listen(port, () => {
-    console.log(`\n🚀 docidx API server running at http://localhost:${port}/`);
+  server.listen(port, host, () => {
+    const displayHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
+    console.log(`\n🚀 docidx API server running at http://${displayHost}:${port}/ (bound to ${host})`);
     console.log(`   Model: ${app.agentModel}`);
     console.log(`   Index: ${app.manifest.doc_count} docs, ${app.manifest.chunk_count} chunks`);
     console.log(`   Debug: ${debugDir} (cleanup: 10min, max age: 1 week)`);
@@ -2245,7 +2327,8 @@ async function main(): Promise<void> {
     // Server mode
     if (args.serve) {
       const port = parseInt(args.port, 10) || 3000;
-      await startServer(app, port);
+      const host = args.host || '127.0.0.1';
+      await startServer(app, port, host);
       return;
     }
 
