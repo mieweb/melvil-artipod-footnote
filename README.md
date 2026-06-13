@@ -30,16 +30,42 @@ Melvil features:
 
 ## Overview
 
-This tool (docidx) is a markdown compiler that produces FOOTNOTE-enabled indexes for server-side RAG consumption. 
+This package (`@mieweb/footnote`) ships:
 
-See https://alexgarcia.xyz/sqlite-vec/wasm.html for in browser example
+- **`docidx` CLI** — a markdown compiler that produces FOOTNOTE-enabled indexes for server-side RAG consumption.
+- **`footnote` CLI + `@mieweb/footnote/vectorize` library** — a Cloudflare [Vectorize](https://developers.cloudflare.com/vectorize/)-compatible local vector index. Same handler code runs locally (Node + Hono) or on Workers. See **[FOOTNOTE-VECTORIZE.md](FOOTNOTE-VECTORIZE.md)** for the full API and CLI reference.
+
+See https://alexgarcia.xyz/sqlite-vec/wasm.html for in-browser example.
 
 ## Installation
 
 ```bash
-cd tools/docidx
-npm install
+npm install @mieweb/footnote
 ```
+
+## Cloudflare Vectorize compatibility
+
+`@mieweb/footnote/vectorize` is a drop-in for Cloudflare's `env.YOUR_INDEX` binding. Write your handler once; run it locally against a sqlite file or on Workers against real Vectorize, with no code changes.
+
+```ts
+import { Hono } from 'hono';
+import { createLocalIndex, vectorizeBindings } from '@mieweb/footnote/vectorize/hono';
+
+const MY_INDEX = createLocalIndex({ name: 'demo', dimensions: 768, metric: 'cosine' });
+const app = new Hono();
+app.use('*', vectorizeBindings({ MY_INDEX }));
+app.post('/search', async (c) => c.json(await c.env.MY_INDEX.query(await c.req.json())));
+```
+
+CLI mirroring `wrangler vectorize`:
+
+```bash
+npx footnote vectorize create demo --dimensions=768 --metric=cosine
+npx footnote vectorize upsert demo --file=vectors.ndjson
+npx footnote vectorize query  demo --vector=@q.json --top-k=5 --return-metadata=all
+```
+
+Full reference: **[FOOTNOTE-VECTORIZE.md](FOOTNOTE-VECTORIZE.md)** (API parity table, filter operators, metadata indexes, namespaces, auto-embed extension).
 
 ## Usage
 
@@ -106,7 +132,7 @@ ollama pull nomic-embed-text
 
 Option 2 - Auto-pull with `--pull` flag:
 ```bash
-./docidx.sh build --embedding-model ollama:bge-m3 --pull
+./footnote.sh build --embedding-model ollama:bge-m3 --pull
 ```
 
 ### Test Query
@@ -120,10 +146,10 @@ npm run docidx -- query --hybrid "patient registration" --k 5
 Test different search modes interactively:
 
 ```bash
-./docidx.sh test --mode fts "FHIR API"
-./docidx.sh test --mode hybrid "how do I schedule"
-./docidx.sh test --mode literal "ADT^A04"
-./docidx.sh test --mode grep "copyright"   # requires --copy-content
+./footnote.sh test --mode fts "FHIR API"
+./footnote.sh test --mode hybrid "how do I schedule"
+./footnote.sh test --mode literal "ADT^A04"
+./footnote.sh test --mode grep "copyright"   # requires --copy-content
 ```
 
 ### AI Agent Search
@@ -131,9 +157,9 @@ Test different search modes interactively:
 Ask questions with an agentic RAG assistant:
 
 ```bash
-./docidx.sh ask "How do I schedule an appointment?"
-./docidx.sh ask -v "What is FHIR?"          # verbose: show tool calls
-./docidx.sh ask -c "terms of use"           # show full chunk content
+./footnote.sh ask "How do I schedule an appointment?"
+./footnote.sh ask -v "What is FHIR?"          # verbose: show tool calls
+./footnote.sh ask -c "terms of use"           # show full chunk content
 ```
 
 The agent has access to these tools:
@@ -149,8 +175,8 @@ The agent has access to these tools:
 The ask agent includes a built-in HTTP server that demonstrates how external applications can consume a footnote index. This serves as a **proof of concept** for building documentation assistants, chatbots, or search interfaces.
 
 ```bash
-./docidx.sh ask --serve --port 3000              # Start server
-./docidx.sh ask --serve --port 3000 --verbose    # With request logging
+./footnote.sh ask --serve --port 3000              # Start server
+./footnote.sh ask --serve --port 3000 --verbose    # With request logging
 ```
 
 ### MCP Server (Model Context Protocol)
@@ -305,7 +331,7 @@ Benchmarked on ~1000 markdown documents (~10K chunks) on macOS:
 To enable grep-based search (for comparison or fallback):
 
 ```bash
-./docidx.sh build --copy-content
+./footnote.sh build --copy-content
 ```
 
 This copies markdown files to `.footnote/content/` (~3MB for 1000 docs).

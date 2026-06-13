@@ -1,13 +1,14 @@
 {
-  "name": "@mieweb/docidx",
+  "name": "@mieweb/footnote",
   "version": "2.0.0",
-  "description": "Markdown content index compiler producing SQLite hybrid index artifacts (sqlite-vec + FTS5) for RAG agents",
+  "description": "FOOTNOTE: portable SQLite hybrid index (sqlite-vec + FTS5) for RAG, with a Cloudflare Vectorize-compatible local binding",
   "type": "module",
   "engines": {
     "node": ">= 20.10.0"
   },
   "bin": {
-    "docidx": "./bin/docidx.js"
+    "docidx": "./bin/docidx.js",
+    "footnote": "./bin/footnote.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,6 +20,22 @@
     "./config": {
       "import": "./dist/config/index.js",
       "types": "./dist/config/index.d.ts"
+    },
+    "./vectorize": {
+      "import": "./dist/vectorize/index.js",
+      "types": "./dist/vectorize/index.d.ts"
+    },
+    "./vectorize/hono": {
+      "import": "./dist/vectorize/hono.js",
+      "types": "./dist/vectorize/hono.d.ts"
+    }
+  },
+  "peerDependencies": {
+    "hono": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "hono": {
+      "optional": true
     }
   },
   "files": [
@@ -47,7 +64,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/mieweb/docidx.git"
+    "url": "https://github.com/mieweb/melvil-artipod-footnote.git"
   },
   "author": "MIE",
   "license": "MIT",
@@ -79,6 +96,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/minimist": "^1.2.5",
     "@types/node": "^22.10.0",
+    "hono": "^4.12.19",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

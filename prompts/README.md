@@ -7,7 +7,7 @@ This directory contains customizable system prompts for the docidx agent.
 During build, specify a custom prompt file:
 
 ```bash
-./docidx.sh build --prompt-file prompts/webchart.txt
+./footnote.sh build --prompt-file prompts/webchart.txt
 ```
 
 The prompt will be stored in the manifest and used when running `docidx ask`.

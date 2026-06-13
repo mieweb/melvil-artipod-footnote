@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# docidx CLI wrapper
+# footnote CLI wrapper
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 

@@ -307,13 +307,13 @@ Enable only when grep search is needed for comparison or fallback.
 
 ```bash
 # Basic build
-./docidx.sh build
+./footnote.sh build
 
 # With content copy for grep support
-./docidx.sh build --copy-content
+./footnote.sh build --copy-content
 
 # With filters
-./docidx.sh build --filter brand=eh
+./footnote.sh build --filter brand=eh
 ```
 
 ### Consuming a Footnote Index
