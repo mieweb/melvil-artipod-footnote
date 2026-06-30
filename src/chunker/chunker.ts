@@ -5,6 +5,7 @@
  * with configurable max tokens and overlap.
  */
 import { createHash } from 'crypto';
+import { renderEmbeddingText, embeddingHashInput } from '../render/embedding-text.js';
 
 export interface ChunkConfig {
   maxTokens: number;
@@ -14,8 +15,14 @@ export interface ChunkConfig {
 export interface Chunk {
   index: number;
   headingPath: string[];
+  /** Raw chunk body — used for storage, display, citations, FTS and literal search. */
   content: string;
+  /** Hash of the raw body. Stable display/provenance identity for the chunk. */
   contentHash: string;
+  /** Context-rendered text that is actually embedded (heading ancestry + assertion cues + body). */
+  embeddingText: string;
+  /** Hash of embeddingText (with render version) — the embedding cache key. */
+  embeddingHash: string;
   tokenCount: number;
 }
 
@@ -35,6 +42,32 @@ export function estimateTokens(text: string): number {
  */
 export function hashContent(content: string): string {
   return createHash('sha256').update(content).digest('hex').slice(0, 16);
+}
+
+/**
+ * Build a complete Chunk from its raw pieces, deriving contentHash and the
+ * context-rendered embeddingText / embeddingHash. All chunk construction routes
+ * through here so the embedding fields are never forgotten on a return path.
+ */
+function finalizeChunk(params: {
+  index: number;
+  headingPath: string[];
+  content: string;
+  tokenCount: number;
+}): Chunk {
+  const embeddingText = renderEmbeddingText({
+    headingPath: params.headingPath,
+    content: params.content
+  });
+  return {
+    index: params.index,
+    headingPath: [...params.headingPath],
+    content: params.content,
+    contentHash: hashContent(params.content),
+    embeddingText,
+    embeddingHash: hashContent(embeddingHashInput(embeddingText)),
+    tokenCount: params.tokenCount
+  };
 }
 
 /**
@@ -84,13 +117,12 @@ function packWithOverlap(
     // If adding this unit would exceed max tokens, finalize current chunk
     if (currentTokens + unitTokens > maxTokens && currentUnits.length > 0) {
       const content = currentUnits.join('\n\n');
-      chunks.push({
+      chunks.push(finalizeChunk({
         index: chunkIndex++,
-        headingPath: [...headingPath],
+        headingPath,
         content,
-        contentHash: hashContent(content),
         tokenCount: currentTokens
-      });
+      }));
 
       // Calculate overlap: keep trailing units up to overlapTokens
       let overlapUnits: string[] = [];
@@ -117,13 +149,12 @@ function packWithOverlap(
   // Final chunk
   if (currentUnits.length > 0) {
     const content = currentUnits.join('\n\n');
-    chunks.push({
+    chunks.push(finalizeChunk({
       index: chunkIndex,
-      headingPath: [...headingPath],
+      headingPath,
       content,
-      contentHash: hashContent(content),
       tokenCount: currentTokens
-    });
+    }));
   }
 
   return chunks;
@@ -147,13 +178,12 @@ export function chunkSection(
   // For small content, just return as single chunk
   const totalTokens = estimateTokens(content);
   if (totalTokens <= config.maxTokens) {
-    return [{
+    return [finalizeChunk({
       index: startIndex,
-      headingPath: [...headingPath],
+      headingPath,
       content: content.trim(),
-      contentHash: hashContent(content.trim()),
       tokenCount: totalTokens
-    }];
+    })];
   }
 
   // Try paragraph-level chunking first
