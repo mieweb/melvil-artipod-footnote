@@ -693,11 +693,12 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
   }
 
   // Format results for the LLM - include FULL content, not just snippets
-  // Explicit, unmissable assertion guidance per status so even a small model acts on it.
+  // Explicit assertion guidance per status. Scoped to THIS passage so the model
+  // doesn't over-apply "absent" to findings that appear (present) in other passages.
   const ASSERTION_NOTE: Record<string, string> = {
-    absent: '⚠ CLINICAL ASSERTION = ABSENT — the source explicitly DENIES or rules out the finding(s) below. Report them as denied/absent; do NOT state them as present.',
-    possible: '⚠ CLINICAL ASSERTION = POSSIBLE — uncertain or part of a differential. Report as possible, not confirmed.',
-    historical: '⚠ CLINICAL ASSERTION = HISTORICAL — a past condition, not necessarily current.',
+    absent: '[Assertion: the specific findings named in THIS passage are documented as ABSENT/denied. Applies ONLY to findings stated here — not to findings in other passages.]',
+    possible: '[Assertion: findings in THIS passage are POSSIBLE/uncertain (a differential), not confirmed.]',
+    historical: '[Assertion: findings in THIS passage are HISTORICAL — past, not necessarily current.]',
   };
   const formatted = results.map((r, i) => {
     const globalIdx = ctx.resultOrder.indexOf(r.chunk_id) + 1;
