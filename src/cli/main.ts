@@ -360,16 +360,24 @@ async function main(): Promise<void> {
         }
 
         logger.info(`Querying index at ${dbPath}...`);
+        // --exclude-denied drops results a note explicitly denies (assertion=absent).
+        const excludeAssertions = args['exclude-denied'] ? ['absent'] : undefined;
         const results = await queryIndex({
           dbPath,
           query: args.hybrid,
           k: args.k,
-          embeddingModel: args['embedding-model']
+          embeddingModel: args['embedding-model'],
+          excludeAssertions
         });
 
         console.log('\n--- Results ---\n');
+        if (excludeAssertions) {
+          console.log('(filtering out findings the note denies: assertion=absent)\n');
+        }
         for (const [i, result] of results.entries()) {
-          console.log(`${i + 1}. [${result.score.toFixed(4)}] ${result.title}`);
+          const a = (result.assertion || 'unspecified').toLowerCase();
+          const tag = a !== 'unspecified' ? `  [assertion: ${a.toUpperCase()}]` : '';
+          console.log(`${i + 1}. [${result.score.toFixed(4)}] ${result.title}${tag}`);
           console.log(`   URL: ${result.url}`);
           console.log(`   Headings: ${result.headings.join(' > ')}`);
           console.log(`   Chunk: ${result.chunk_id}`);

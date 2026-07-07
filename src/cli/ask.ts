@@ -209,6 +209,21 @@ When citing sources in your answer:
 - If search results show [1], [2], [5] - use those exact numbers, not [1], [2], [3]`;
 
 /**
+ * Assertion-awareness directive — appended to every system prompt so answers respect
+ * the clinical assertion tags surfaced in search results (issue #15, Phase 2).
+ */
+const ASSERTION_DIRECTIVE = `
+
+## CLINICAL ASSERTIONS (CRITICAL)
+
+Some search results are tagged with a clinical assertion status, e.g. "(assertion: ABSENT)":
+- ABSENT — the source explicitly DENIES or rules out that finding. NEVER report it as present; state that it was denied/absent, and you may still cite it.
+- POSSIBLE — uncertain / part of a differential. Report as possible, not confirmed.
+- HISTORICAL — a past condition, not necessarily current.
+- Results with no tag (or PRESENT) are asserted normally.
+Honor these tags: a finding listed under a "Negative for" section is NOT present.`;
+
+/**
  * Build the system prompt by interpolating {{TOOLS}} placeholder with actual tools definition
  * and appending the FINAL: directive for reliable answer detection.
  */
@@ -216,8 +231,8 @@ function buildSystemPrompt(manifest: ManifestData): string {
   const template = manifest.agent?.system_prompt || DEFAULT_SYSTEM_PROMPT;
   const toolsDefinition = buildToolsDefinition(manifest);
   const basePrompt = template.replace('{{TOOLS}}', toolsDefinition.trim());
-  // Always append the final answer directive for reliable detection
-  return basePrompt + FINAL_ANSWER_DIRECTIVE;
+  // Always append the final answer + assertion directives
+  return basePrompt + FINAL_ANSWER_DIRECTIVE + ASSERTION_DIRECTIVE;
 }
 
 /**
@@ -324,6 +339,8 @@ interface SearchResult {
   headings: string[];
   content: string;
   score: number;
+  /** Clinical assertion status (Phase 2). Surfaced to the LLM so it respects negation. */
+  assertion?: string;
   method: 'hybrid' | 'fts' | 'literal' | 'document' | 'related' | 'grep';
   vectorRank?: number;
   ftsRank?: number;
@@ -392,6 +409,7 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
         headings: r.headings,
         content: r.content,
         score: r.score,
+        assertion: r.assertion,
         method: 'hybrid' as const,
         vectorRank: r.vectorRank,
         ftsRank: r.ftsRank
@@ -410,6 +428,7 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
         headings: r.headings,
         content: r.content,
         score: -r.bm25Score,
+        assertion: r.assertion,
         method: 'fts' as const,
         ftsRank: i + 1
       }));
@@ -427,6 +446,7 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
         headings: r.headings,
         content: r.content,
         score: r.matchCount,
+        assertion: r.assertion,
         method: 'literal' as const,
         ftsRank: i + 1  // Use ftsRank for display consistency
       }));
@@ -678,8 +698,11 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
     const location = r.headings.length > 0
       ? `${r.title} > ${r.headings.join(' > ')}`
       : r.title;
+    // Surface the clinical assertion so the LLM doesn't report a denied finding as present.
+    const a = (r.assertion || 'unspecified').toLowerCase();
+    const tag = a !== 'unspecified' ? ` (assertion: ${a.toUpperCase()})` : '';
     // Include full content so LLM can actually read the documents
-    return `[${globalIdx}] ${location}\n    URL: ${r.url}\n\n${r.content}`;
+    return `[${globalIdx}]${tag} ${location}\n    URL: ${r.url}\n\n${r.content}`;
   }).join('\n\n---\n\n');
 
   // Build chunk metadata for streaming
