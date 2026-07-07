@@ -7,6 +7,7 @@
 import { createHash } from 'crypto';
 import { renderEmbeddingText, embeddingHashInput } from '../render/embedding-text.js';
 import { detectAssertion, type AssertionStatus } from '../assertion/assertion.js';
+import { extractFindings, type FindingAssertion } from '../assertion/findings.js';
 
 export interface ChunkConfig {
   maxTokens: number;
@@ -26,6 +27,8 @@ export interface Chunk {
   embeddingHash: string;
   /** Chunk-level clinical assertion status (Phase 2) — queryable retrieval metadata. */
   assertion: AssertionStatus;
+  /** Per-finding assertions for curated high-risk clinical findings (Phase 2, bullet 2). */
+  findings: FindingAssertion[];
   tokenCount: number;
 }
 
@@ -66,6 +69,10 @@ function finalizeChunk(params: {
     headingPath: params.headingPath,
     content: params.content
   }).status;
+  const findings = extractFindings({
+    headingPath: params.headingPath,
+    content: params.content
+  });
   return {
     index: params.index,
     headingPath: [...params.headingPath],
@@ -74,6 +81,7 @@ function finalizeChunk(params: {
     embeddingText,
     embeddingHash: hashContent(embeddingHashInput(embeddingText)),
     assertion,
+    findings,
     tokenCount: params.tokenCount
   };
 }

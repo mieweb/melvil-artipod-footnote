@@ -30,6 +30,8 @@ export interface ChunkRecord {
   content_hash: string;
   /** Chunk-level clinical assertion status (Phase 2): present|absent|possible|historical|unspecified. */
   assertion: string;
+  /** Per-finding assertions (Phase 2, bullet 2) as a JSON string. Optional: only some reads hydrate it. */
+  findings?: string;
   updated_at: number;
   vector: number[];
 }
@@ -110,6 +112,7 @@ export class SqliteStore {
         content TEXT NOT NULL,
         content_hash TEXT NOT NULL,
         assertion TEXT NOT NULL DEFAULT 'unspecified',
+        findings TEXT NOT NULL DEFAULT '[]',
         updated_at INTEGER NOT NULL
       );
 
@@ -123,6 +126,11 @@ export class SqliteStore {
     // CREATE TABLE IF NOT EXISTS won't add a column to a table that already exists.
     try {
       this.db.exec(`ALTER TABLE chunks ADD COLUMN assertion TEXT NOT NULL DEFAULT 'unspecified'`);
+    } catch {
+      // Column already exists — nothing to do.
+    }
+    try {
+      this.db.exec(`ALTER TABLE chunks ADD COLUMN findings TEXT NOT NULL DEFAULT '[]'`);
     } catch {
       // Column already exists — nothing to do.
     }
@@ -166,8 +174,8 @@ export class SqliteStore {
   private prepareStatements(): void {
     this.insertChunkStmt = this.db.prepare(`
       INSERT OR REPLACE INTO chunks
-      (chunk_id, doc_id, path, url, title, section, tags, date, headings, content, content_hash, assertion, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (chunk_id, doc_id, path, url, title, section, tags, date, headings, content, content_hash, assertion, findings, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.insertVectorStmt = this.db.prepare(`
@@ -206,6 +214,7 @@ export class SqliteStore {
           chunk.content,
           chunk.content_hash,
           chunk.assertion,
+          chunk.findings ?? '[]',
           chunk.updated_at
         );
 
@@ -621,7 +630,7 @@ export class SqliteStore {
     const rows = this.db.prepare(`
       SELECT 
         chunk_id, doc_id, path, url, title, section, 
-        tags, date, headings, content, content_hash, assertion, updated_at
+        tags, date, headings, content, content_hash, assertion, findings, updated_at
       FROM chunks
       WHERE doc_id = ? OR url = ? OR url LIKE ? OR url LIKE ?
       ORDER BY chunk_id
@@ -638,6 +647,7 @@ export class SqliteStore {
       content: string;
       content_hash: string;
       assertion: string;
+      findings: string;
       updated_at: number;
     }>;
 
@@ -654,6 +664,7 @@ export class SqliteStore {
       content: row.content,
       content_hash: row.content_hash,
       assertion: row.assertion,
+      findings: row.findings,
       updated_at: row.updated_at,
       vector: []
     }));
