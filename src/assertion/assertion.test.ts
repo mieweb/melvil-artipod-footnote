@@ -19,6 +19,13 @@ test('body-level negation is caught under a neutral heading (the Phase-2 delta)'
   assert.ok(r.triggers.includes('denies'));
 });
 
+test('a "Rule out X" heading is not classified as absent', () => {
+  // Regression: "rule out" is a differential, not a denial — must not be marked absent
+  // (else --exclude-denied would hide the very finding being worked up).
+  const r = detectAssertion({ headingPath: ['Assessment', 'Rule out MI'], content: 'chest pain evaluation' });
+  assert.notEqual(r.status, 'absent');
+});
+
 test('uncertainty is distinguished as possible (heading polarity cannot express this)', () => {
   const r = detectAssertion({ headingPath: ['Assessment'], content: 'r/o pneumonia; differential diagnosis includes CHF.' });
   assert.equal(r.status, 'possible');

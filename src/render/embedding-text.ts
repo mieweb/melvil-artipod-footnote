@@ -22,7 +22,7 @@
  */
 
 /** Bump when the rendering output for the same input changes. */
-export const RENDER_VERSION = 1;
+export const RENDER_VERSION = 2;
 
 export interface RenderInput {
   headingPath: string[];
@@ -39,8 +39,11 @@ export interface RenderInput {
  * of Generality", "Negative Feedback") and inject a false clinical preamble into their
  * embeddings. Only phrases that are overwhelmingly clinical-negation survive here.
  */
+// Note: "rule out" / "r/o" are intentionally NOT here — clinically they mean the
+// finding is being *considered* (a differential), not denied. They map to "possible"
+// in the body-level assertion scan, not to negation at the heading level.
 const NEGATION_CUE =
-  /\b(negative for|pertinent negatives|denies|denied|no known|no evidence of|absence of|rule[ -]?out|r\/o|within normal limits|wnl|unremarkable|none reported)\b/i;
+  /\b(negative for|pertinent negatives|denies|denied|no known|no evidence of|absence of|within normal limits|wnl|unremarkable|none reported)\b/i;
 
 /**
  * Heading cues that imply the listed/described findings are PRESENT or reported.

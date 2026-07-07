@@ -58,15 +58,20 @@ const HIGH_RISK_FINDINGS: Array<{ name: string; aliases?: string[] }> = [
 
 /** Left-context triggers, checked in precedence order (nearest scope wins the category). */
 const SCOPE_TRIGGERS: Array<{ status: AssertionStatus; cues: string[] }> = [
-  // Negation is the strongest local signal next to a known finding.
-  { status: 'absent', cues: ['denies', 'denied', 'no', 'not', 'without', 'negative for', 'no evidence of', 'ruled out', 'resolved', 'free of', 'nkda', 'nka'] },
+  // Negation is the strongest local signal next to a known finding. (Post-position
+  // cues like "resolved"/"denied" are handled by the right-context scan below, not here.)
+  { status: 'absent', cues: ['denies', 'denied', 'no', 'not', 'without', 'negative for', 'no evidence of', 'ruled out', 'free of', 'nkda', 'nka'] },
   { status: 'possible', cues: ['possible', 'possibly', 'probable', 'likely', 'cannot rule out', "can't rule out", 'rule out', 'r/o', 'suspected', 'concern for', 'differential', 'question of', 'questionable'] },
   { status: 'historical', cues: ['history of', 'h/o', 'hx of', 'status post', 's/p', 'prior', 'previously', 'past medical history', 'pmh'] },
   { status: 'present', cues: ['positive for', 'complains of', 'c/o', 'reports', 'endorses', 'presents with'] },
 ];
 
-/** Words/punctuation that terminate an assertion's scope (ConText-lite). */
-const SCOPE_TERMINATORS = /\b(but|however|otherwise|except|though|although|aside from|apart from)\b|[;]/i;
+/**
+ * Words/punctuation that terminate an assertion's scope (ConText-lite). Sentence
+ * enders (. ! ? newline) and semicolons break scope so negation from one sentence
+ * does not bleed into a finding in the next; conjunctions ("but") break it mid-sentence.
+ */
+const SCOPE_TERMINATORS = /\b(but|however|otherwise|except|though|although|aside from|apart from)\b|[.;!?\n]/i;
 
 const WINDOW = 60; // chars of left context to consider before a finding
 
@@ -97,6 +102,20 @@ function scopeAssertion(leftContext: string): { status: AssertionStatus; evidenc
   return null;
 }
 
+/** Negation/resolution stated AFTER the finding, e.g. "chest pain, now resolved" or
+ *  "chest pain denied by patient". Scanned only up to the first scope terminator. */
+const POST_NEGATION = ['denied', 'resolved', 'ruled out', 'negative', 'no longer', 'not present', 'absent'];
+
+function scanRightNegation(rightContext: string): string | null {
+  // Only the text before the first scope terminator belongs to this finding.
+  const term = rightContext.match(SCOPE_TERMINATORS);
+  const scope = term && term.index !== undefined ? rightContext.slice(0, term.index) : rightContext;
+  for (const cue of POST_NEGATION) {
+    if (cueRegex(cue).test(scope)) return cue;
+  }
+  return null;
+}
+
 /**
  * Extract per-finding assertions from a chunk. Returns one entry per (finding,
  * assertion) pair found; a finding asserted twice with the same status is deduped.
@@ -111,10 +130,21 @@ export function extractFindings({ headingPath, content }: { headingPath: string[
       const re = new RegExp(`\\b${escapeRe(surface)}\\b`, 'gi');
       let m: RegExpExecArray | null;
       while ((m = re.exec(content)) !== null) {
+        const end = m.index + m[0].length;
         const left = content.slice(Math.max(0, m.index - WINDOW), m.index);
+        const right = content.slice(end, end + WINDOW);
         const scoped = scopeAssertion(left);
-        const assertion: AssertionStatus = scoped?.status ?? headingPolarity ?? 'present';
-        const evidence = scoped?.evidence ?? (headingPolarity ? 'heading' : 'stated');
+        // Explicit negation/resolution on EITHER side makes the finding absent.
+        const postNeg = scanRightNegation(right);
+        let assertion: AssertionStatus;
+        let evidence: string;
+        if (postNeg) {
+          assertion = 'absent';
+          evidence = postNeg;
+        } else {
+          assertion = scoped?.status ?? headingPolarity ?? 'present';
+          evidence = scoped?.evidence ?? (headingPolarity ? 'heading' : 'stated');
+        }
 
         const key = `${name}|${assertion}`;
         if (!seen.has(key)) {

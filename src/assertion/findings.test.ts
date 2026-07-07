@@ -59,3 +59,15 @@ test('scope terminator stops negation from leaking to the next finding', () => {
   assert.equal(m.get('chest pain'), 'absent');
   assert.equal(m.get('hemoptysis'), 'present');
 });
+
+test('negation does not leak across a sentence boundary (period)', () => {
+  // Regression: a period must break scope, or "denies" flips the next sentence's finding.
+  const m = byName('Denies chest pain. Reports new hemoptysis.');
+  assert.equal(m.get('chest pain'), 'absent');
+  assert.equal(m.get('hemoptysis'), 'present'); // NOT absent
+});
+
+test('negation/resolution stated AFTER the finding is caught', () => {
+  assert.equal(byName('Chest pain, now resolved.').get('chest pain'), 'absent');
+  assert.equal(byName('Chest pain was denied by the patient.').get('chest pain'), 'absent');
+});

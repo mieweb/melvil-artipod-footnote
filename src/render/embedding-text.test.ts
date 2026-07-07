@@ -75,6 +75,12 @@ test('positive section asserts presence and is distinct from the negative render
   assert.notEqual(negative, positive);
 });
 
+test('a "Rule out X" heading is NOT treated as negation', () => {
+  // "rule out" means the finding is being considered (a differential), not denied.
+  assert.equal(assertionPolarity(['Assessment', 'Rule out MI']), null);
+  assert.equal(assertionPolarity(['Plan', 'r/o pneumonia']), null);
+});
+
 test('neutral heading gets a section label but no polarity claim', () => {
   const text = renderEmbeddingText({ headingPath: ['Plan'], content: 'Order MRI.' });
   assert.match(text, /Section: Plan\./);
