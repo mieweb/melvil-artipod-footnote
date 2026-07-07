@@ -43,6 +43,8 @@ export interface QueryResult {
   content: string;
   /** Chunk-level clinical assertion status (Phase 2). */
   assertion: string;
+  /** Per-finding assertions (Phase 2) as a JSON string: [{finding, assertion, evidence}]. */
+  findings: string;
   score: number;
   vectorRank?: number;
   ftsRank?: number;
@@ -103,6 +105,9 @@ export async function queryIndex(options: QueryOptions): Promise<QueryResult[]> 
     logger.debug(`Running hybrid search (k=${fetchK})`);
     const results = store.hybridSearch(queryVector, options.query, fetchK);
 
+    // Hydrate per-finding assertions for the returned chunks (Phase 2).
+    const findingsMap = store.getFindingsByChunkIds(results.map(r => r.chunk_id));
+
     // Format results, dropping any with an excluded assertion status
     return results
       .filter(r => !exclude.has((r.assertion || 'unspecified').toLowerCase()))
@@ -115,6 +120,7 @@ export async function queryIndex(options: QueryOptions): Promise<QueryResult[]> 
         headings: Array.isArray(r.headings) ? r.headings : (r.headings ? [String(r.headings)] : []),
         content: r.content.slice(0, 200) + (r.content.length > 200 ? '...' : ''),
         assertion: r.assertion || 'unspecified',
+        findings: findingsMap.get(r.chunk_id) || '[]',
         score: r.score,
         vectorRank: r.vectorRank,
         ftsRank: r.ftsRank

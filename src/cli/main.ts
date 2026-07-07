@@ -380,7 +380,14 @@ async function main(): Promise<void> {
           console.log(`${i + 1}. [${result.score.toFixed(4)}] ${result.title}${tag}`);
           console.log(`   URL: ${result.url}`);
           console.log(`   Headings: ${result.headings.join(' > ')}`);
-          console.log(`   Chunk: ${result.chunk_id}`);
+          // Per-finding assertions (Phase 2): each clinical finding tagged from the prose.
+          const findings = JSON.parse(result.findings || '[]') as Array<{ finding: string; assertion: string; evidence: string }>;
+          if (findings.length > 0) {
+            console.log(`   Per-finding:`);
+            for (const f of findings) {
+              console.log(`     • ${f.finding} → ${f.assertion.toUpperCase()}  (from the word "${f.evidence}")`);
+            }
+          }
           console.log('');
         }
         break;

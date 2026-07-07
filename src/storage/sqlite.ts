@@ -589,6 +589,21 @@ export class SqliteStore {
   }
 
   /**
+   * Fetch the per-finding assertions (JSON string) for a set of chunk IDs (Phase 2).
+   * Lets the search/query path surface findings without hydrating them on every result.
+   */
+  getFindingsByChunkIds(chunkIds: string[]): Map<string, string> {
+    const result = new Map<string, string>();
+    if (chunkIds.length === 0) return result;
+    const placeholders = chunkIds.map(() => '?').join(',');
+    const rows = this.db.prepare(
+      `SELECT chunk_id, findings FROM chunks WHERE chunk_id IN (${placeholders})`
+    ).all(...chunkIds) as { chunk_id: string; findings: string }[];
+    for (const r of rows) result.set(r.chunk_id, r.findings);
+    return result;
+  }
+
+  /**
    * Remove multiple file tracking infos
    */
   removeFileInfos(filePaths: string[]): void {
