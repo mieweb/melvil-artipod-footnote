@@ -29,6 +29,23 @@ test('assertionPolarity reads negation cues from the heading path', () => {
   assert.equal(assertionPolarity(['Assessment', 'Plan']), null);
 });
 
+test('assertionPolarity does NOT fire on common non-clinical headings', () => {
+  // FOOTNOTE indexes general docs; cues must be strong enough not to mislabel these.
+  // A false polarity preamble would pollute these chunks' embeddings.
+  for (const h of [
+    ['Annual Reports'],
+    ['Status Reports'],
+    ['Positive Feedback'],
+    ['Negative Feedback'],
+    ['Without Loss of Generality'],
+    ['Absent'],
+    ['History of Present Illness'], // bare "present" must not trigger
+    ['Overview'],
+  ]) {
+    assert.equal(assertionPolarity(h), null, `expected null for ${JSON.stringify(h)}`);
+  }
+});
+
 test('negative section preserves the denied/absent context in embedding text', () => {
   const text = renderEmbeddingText({
     headingPath: ['Review of Systems', 'Negative for'],

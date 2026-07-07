@@ -32,17 +32,24 @@ export interface RenderInput {
 /**
  * Heading cues that imply the listed/described findings are ABSENT or denied.
  * Matched case-insensitively against the joined heading path.
+ *
+ * These are deliberately STRONG, multi-word (or unambiguous) cues. FOOTNOTE indexes
+ * general documentation, not just clinical notes, so single common words are avoided:
+ * bare "absent"/"without"/"negatives" would mislabel everyday headings ("Without Loss
+ * of Generality", "Negative Feedback") and inject a false clinical preamble into their
+ * embeddings. Only phrases that are overwhelmingly clinical-negation survive here.
  */
 const NEGATION_CUE =
-  /\b(negative for|negatives?|denies?|denied|no known|absence of|absent|without|rule[ -]?out|r\/o|wnl|unremarkable|none reported)\b/i;
+  /\b(negative for|pertinent negatives|denies|denied|no known|no evidence of|absence of|rule[ -]?out|r\/o|within normal limits|wnl|unremarkable|none reported)\b/i;
 
 /**
  * Heading cues that imply the listed/described findings are PRESENT or reported.
- * Intentionally narrower than negation — we only assert presence on strong cues so
- * neutral sections (e.g. "Plan") get a section label but no polarity claim.
+ * Same principle as NEGATION_CUE — strong multi-word cues only. Bare "present",
+ * "positives", or "reports" are excluded because they match ubiquitous non-clinical
+ * headings ("History of Present Illness", "Positive Feedback", "Annual Reports").
  */
 const PRESENCE_CUE =
-  /\b(positive for|positives?|complains? of|c\/o|reports?|presents? with|present|pertinent positives)\b/i;
+  /\b(positive for|pertinent positives|complains? of|c\/o|presents? with)\b/i;
 
 export type AssertionPolarity = 'absent' | 'present' | null;
 
