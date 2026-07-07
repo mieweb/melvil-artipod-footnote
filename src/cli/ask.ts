@@ -693,6 +693,12 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
   }
 
   // Format results for the LLM - include FULL content, not just snippets
+  // Explicit, unmissable assertion guidance per status so even a small model acts on it.
+  const ASSERTION_NOTE: Record<string, string> = {
+    absent: '⚠ CLINICAL ASSERTION = ABSENT — the source explicitly DENIES or rules out the finding(s) below. Report them as denied/absent; do NOT state them as present.',
+    possible: '⚠ CLINICAL ASSERTION = POSSIBLE — uncertain or part of a differential. Report as possible, not confirmed.',
+    historical: '⚠ CLINICAL ASSERTION = HISTORICAL — a past condition, not necessarily current.',
+  };
   const formatted = results.map((r, i) => {
     const globalIdx = ctx.resultOrder.indexOf(r.chunk_id) + 1;
     const location = r.headings.length > 0
@@ -701,8 +707,9 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
     // Surface the clinical assertion so the LLM doesn't report a denied finding as present.
     const a = (r.assertion || 'unspecified').toLowerCase();
     const tag = a !== 'unspecified' ? ` (assertion: ${a.toUpperCase()})` : '';
+    const note = ASSERTION_NOTE[a] ? `\n    ${ASSERTION_NOTE[a]}` : '';
     // Include full content so LLM can actually read the documents
-    return `[${globalIdx}]${tag} ${location}\n    URL: ${r.url}\n\n${r.content}`;
+    return `[${globalIdx}]${tag} ${location}\n    URL: ${r.url}${note}\n\n${r.content}`;
   }).join('\n\n---\n\n');
 
   // Build chunk metadata for streaming
