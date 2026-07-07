@@ -285,6 +285,7 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
           headings: chunk.headingPath,
           content: chunk.content,
           content_hash: chunk.contentHash,
+          assertion: chunk.assertion,
           updated_at: Date.now(),
           vector: [] // Will be filled below
         };

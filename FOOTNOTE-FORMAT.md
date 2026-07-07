@@ -104,12 +104,14 @@ CREATE TABLE chunks (
   tags       TEXT,              -- JSON array of tags
   headings   TEXT,              -- JSON array of heading hierarchy
   content    TEXT NOT NULL,     -- Chunk text content
-  content_hash TEXT NOT NULL    -- SHA256 hash for change detection
+  content_hash TEXT NOT NULL,   -- SHA256 hash for change detection
+  assertion  TEXT NOT NULL DEFAULT 'unspecified'  -- Clinical assertion status (Phase 2)
 );
 
 CREATE INDEX idx_chunks_doc_id ON chunks(doc_id);
 CREATE INDEX idx_chunks_path ON chunks(path);
 CREATE INDEX idx_chunks_url ON chunks(url);
+CREATE INDEX idx_chunks_assertion ON chunks(assertion);
 ```
 
 | Column | Type | Description |
@@ -124,6 +126,7 @@ CREATE INDEX idx_chunks_url ON chunks(url);
 | `headings` | TEXT | JSON array of heading hierarchy leading to chunk |
 | `content` | TEXT | The actual chunk text |
 | `content_hash` | TEXT | SHA256 hash of content for incremental updates |
+| `assertion` | TEXT | Chunk-level clinical assertion status: `present`, `absent`, `possible`, `historical`, or `unspecified` (default). Heuristic, heading- and body-cue derived (see issue #15, Phase 2). Retrieval can filter/rerank on it. |
 
 #### `vec_chunks` - Vector embeddings
 
@@ -294,6 +297,7 @@ Enable only when grep search is needed for comparison or fallback.
 | Version | Changes |
 |---------|---------|
 | `1.0` | Initial release: chunks, vec_chunks, chunks_fts, file_tracking, metadata |
+| `1.1` | Added `chunks.assertion` column + index (clinical assertion metadata, issue #15 Phase 2). Additive/backward-compatible: older readers ignore the column; older indexes are forward-migrated via `ALTER TABLE` on open. |
 
 ### Compatibility
 

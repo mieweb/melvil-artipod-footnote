@@ -26,6 +26,12 @@ export interface QueryOptions {
   query: string;
   k: number;
   embeddingModel?: string;
+  /**
+   * Drop results whose assertion status is in this set (Phase 2). E.g. pass
+   * ['absent'] so a query for a symptom doesn't surface chunks where the note
+   * explicitly denies it. Case-insensitive.
+   */
+  excludeAssertions?: string[];
 }
 
 export interface QueryResult {
@@ -35,6 +41,8 @@ export interface QueryResult {
   title: string;
   headings: string[];
   content: string;
+  /** Chunk-level clinical assertion status (Phase 2). */
+  assertion: string;
   score: number;
   vectorRank?: number;
   ftsRank?: number;
@@ -86,22 +94,31 @@ export async function queryIndex(options: QueryOptions): Promise<QueryResult[]> 
     logger.debug(`Embedding query: "${options.query}"`);
     const [queryVector] = await embedder.embed([options.query]);
 
-    // Run hybrid search with RRF
-    logger.debug(`Running hybrid search (k=${options.k})`);
-    const results = store.hybridSearch(queryVector, options.query, options.k);
+    // Over-fetch when we're going to post-filter by assertion, so we can still
+    // return up to k results after dropping excluded ones.
+    const exclude = new Set((options.excludeAssertions || []).map(a => a.toLowerCase()));
+    const fetchK = exclude.size > 0 ? options.k * 3 : options.k;
 
-    // Format results
-    return results.map(r => ({
-      chunk_id: r.chunk_id,
-      doc_id: r.doc_id,
-      url: r.url,
-      title: r.title,
-      headings: Array.isArray(r.headings) ? r.headings : (r.headings ? [String(r.headings)] : []),
-      content: r.content.slice(0, 200) + (r.content.length > 200 ? '...' : ''),
-      score: r.score,
-      vectorRank: r.vectorRank,
-      ftsRank: r.ftsRank
-    }));
+    // Run hybrid search with RRF
+    logger.debug(`Running hybrid search (k=${fetchK})`);
+    const results = store.hybridSearch(queryVector, options.query, fetchK);
+
+    // Format results, dropping any with an excluded assertion status
+    return results
+      .filter(r => !exclude.has((r.assertion || 'unspecified').toLowerCase()))
+      .slice(0, options.k)
+      .map(r => ({
+        chunk_id: r.chunk_id,
+        doc_id: r.doc_id,
+        url: r.url,
+        title: r.title,
+        headings: Array.isArray(r.headings) ? r.headings : (r.headings ? [String(r.headings)] : []),
+        content: r.content.slice(0, 200) + (r.content.length > 200 ? '...' : ''),
+        assertion: r.assertion || 'unspecified',
+        score: r.score,
+        vectorRank: r.vectorRank,
+        ftsRank: r.ftsRank
+      }));
 
   } finally {
     store.close();

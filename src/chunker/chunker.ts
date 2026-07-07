@@ -6,6 +6,7 @@
  */
 import { createHash } from 'crypto';
 import { renderEmbeddingText, embeddingHashInput } from '../render/embedding-text.js';
+import { detectAssertion, type AssertionStatus } from '../assertion/assertion.js';
 
 export interface ChunkConfig {
   maxTokens: number;
@@ -23,6 +24,8 @@ export interface Chunk {
   embeddingText: string;
   /** Hash of embeddingText (with render version) — the embedding cache key. */
   embeddingHash: string;
+  /** Chunk-level clinical assertion status (Phase 2) — queryable retrieval metadata. */
+  assertion: AssertionStatus;
   tokenCount: number;
 }
 
@@ -59,6 +62,10 @@ function finalizeChunk(params: {
     headingPath: params.headingPath,
     content: params.content
   });
+  const assertion = detectAssertion({
+    headingPath: params.headingPath,
+    content: params.content
+  }).status;
   return {
     index: params.index,
     headingPath: [...params.headingPath],
@@ -66,6 +73,7 @@ function finalizeChunk(params: {
     contentHash: hashContent(params.content),
     embeddingText,
     embeddingHash: hashContent(embeddingHashInput(embeddingText)),
+    assertion,
     tokenCount: params.tokenCount
   };
 }
