@@ -27,7 +27,10 @@ function analyze(sentence: string): void {
   const naive = naivePredict(sentence);
   for (const f of findings) {
     const mark = MARK[f.assertion] ?? '·';
-    let line = `   ${mark}  ${f.finding.padEnd(26)} ${f.assertion.toUpperCase().padEnd(10)} (cue: "${f.evidence}")`;
+    const ev = f.evidence === 'stated' ? 'no negation cue → present'
+      : f.evidence === 'heading' ? 'from the section heading'
+      : `cue: "${f.evidence}"`;
+    let line = `   ${mark}  ${f.finding.padEnd(26)} ${f.assertion.toUpperCase().padEnd(10)} (${ev})`;
     if (naive !== f.assertion) {
       line += `   ← naive scanner says ${naive.toUpperCase()}`;
     }

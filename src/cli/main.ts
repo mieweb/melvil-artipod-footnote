@@ -385,7 +385,10 @@ async function main(): Promise<void> {
           if (findings.length > 0) {
             console.log(`   Per-finding:`);
             for (const f of findings) {
-              console.log(`     • ${f.finding} → ${f.assertion.toUpperCase()}  (from the word "${f.evidence}")`);
+              const ev = f.evidence === 'stated' ? 'no negation cue → present'
+                : f.evidence === 'heading' ? 'from the section heading'
+                : `cue: "${f.evidence}"`;
+              console.log(`     • ${f.finding} → ${f.assertion.toUpperCase()}  (${ev})`);
             }
           }
           console.log('');
