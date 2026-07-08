@@ -221,7 +221,12 @@ Some search results are tagged with a clinical assertion status, e.g. "(assertio
 - POSSIBLE — uncertain / part of a differential. Report as possible, not confirmed.
 - HISTORICAL — a past condition, not necessarily current.
 - Results with no tag (or PRESENT) are asserted normally.
-Honor these tags: a finding listed under a "Negative for" section is NOT present.`;
+Honor these tags: a finding listed under a "Negative for" section is NOT present.
+
+A result may also list a "Per-finding:" line (e.g. "chest pain = ABSENT; leg weakness = PRESENT").
+This is MORE specific than the passage-level tag — a single sentence can deny one finding while
+reporting another. When it's present, answer about each finding using ITS OWN status, not the
+passage-level one.`;
 
 /**
  * Build the system prompt by interpolating {{TOOLS}} placeholder with actual tools definition
@@ -341,6 +346,8 @@ interface SearchResult {
   score: number;
   /** Clinical assertion status (Phase 2). Surfaced to the LLM so it respects negation. */
   assertion?: string;
+  /** Per-finding assertions (Phase 2) as a JSON string, hydrated before formatting. */
+  findings?: string;
   method: 'hybrid' | 'fts' | 'literal' | 'document' | 'related' | 'grep';
   vectorRank?: number;
   ftsRank?: number;
@@ -664,6 +671,11 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
     return errorResult(`No results found for "${query}"`);
   }
 
+  // Hydrate per-finding assertions (Phase 2) so the model can reason per finding —
+  // e.g. a chunk where one finding is denied and another is present.
+  const findingsByChunk = ctx.store.getFindingsByChunkIds(results.map(r => r.chunk_id));
+  for (const r of results) r.findings = findingsByChunk.get(r.chunk_id);
+
   // Add results to context (deduplicated)
   for (const r of results) {
     if (!ctx.searchResults.has(r.chunk_id)) {
@@ -709,8 +721,17 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
     const a = (r.assertion || 'unspecified').toLowerCase();
     const tag = a !== 'unspecified' ? ` (assertion: ${a.toUpperCase()})` : '';
     const note = ASSERTION_NOTE[a] ? `\n    ${ASSERTION_NOTE[a]}` : '';
+    // Per-finding assertions (Phase 2): specific findings tagged individually from the
+    // prose. More precise than the chunk-level tag — a single passage can have both.
+    let perFinding = '';
+    try {
+      const fs = JSON.parse(r.findings || '[]') as Array<{ finding: string; assertion: string }>;
+      if (fs.length > 0) {
+        perFinding = '\n    Per-finding: ' + fs.map(f => `${f.finding} = ${f.assertion.toUpperCase()}`).join('; ');
+      }
+    } catch { /* ignore malformed findings */ }
     // Include full content so LLM can actually read the documents
-    return `[${globalIdx}]${tag} ${location}\n    URL: ${r.url}${note}\n\n${r.content}`;
+    return `[${globalIdx}]${tag} ${location}\n    URL: ${r.url}${note}${perFinding}\n\n${r.content}`;
   }).join('\n\n---\n\n');
 
   // Build chunk metadata for streaming
