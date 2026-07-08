@@ -24,6 +24,7 @@
  */
 import { assertionPolarity } from '../render/embedding-text.js';
 import type { AssertionStatus } from './assertion.js';
+import { selectCues, escapeCue, SCOPE_TERMINATORS, type Cue } from './cues.js';
 
 export interface FindingAssertion {
   /** Canonical finding name (from the curated list). */
@@ -56,34 +57,24 @@ const HIGH_RISK_FINDINGS: Array<{ name: string; aliases?: string[] }> = [
 // would false-fire on general documentation. A clinical-document gate would let the
 // list safely include them; see the SCOPE note above.
 
-/** Left-context triggers, checked in precedence order (nearest scope wins the category). */
-const SCOPE_TRIGGERS: Array<{ status: AssertionStatus; cues: string[] }> = [
-  // Negation is the strongest local signal next to a known finding. (Post-position
-  // cues like "resolved"/"denied" are handled by the right-context scan below, not here.)
-  { status: 'absent', cues: ['denies', 'denied', 'no', 'not', 'without', 'negative for', 'no evidence of', 'ruled out', 'free of', 'nkda', 'nka'] },
-  { status: 'possible', cues: ['possible', 'possibly', 'probable', 'likely', 'cannot rule out', "can't rule out", 'rule out', 'r/o', 'suspected', 'concern for', 'differential', 'question of', 'questionable'] },
-  { status: 'historical', cues: ['history of', 'h/o', 'hx of', 'status post', 's/p', 'prior', 'previously', 'past medical history', 'pmh'] },
-  { status: 'present', cues: ['positive for', 'complains of', 'c/o', 'reports', 'endorses', 'presents with'] },
+/**
+ * Left-context (forward) triggers, from the canonical cue table (finding tier — bare
+ * "no"/"not" are safe here because they're anchored to a known finding). Order encodes
+ * precedence: negation is the strongest local signal next to a finding.
+ * (Post-position cues like "resolved"/"denied" are the backward set, handled below.)
+ */
+const SCOPE_TRIGGERS: Array<{ status: AssertionStatus; cues: Cue[] }> = [
+  { status: 'absent', cues: selectCues({ context: 'finding', category: 'negation', direction: 'forward' }) },
+  { status: 'possible', cues: selectCues({ context: 'finding', category: 'uncertainty', direction: 'forward' }) },
+  { status: 'historical', cues: selectCues({ context: 'finding', category: 'historical', direction: 'forward' }) },
+  { status: 'present', cues: selectCues({ context: 'finding', category: 'presence', direction: 'forward' }) },
 ];
 
-/**
- * Words/punctuation that terminate an assertion's scope (ConText-lite). Sentence
- * enders (. ! ? newline) and semicolons break scope so negation from one sentence
- * does not bleed into a finding in the next; conjunctions ("but") break it mid-sentence.
- */
-const SCOPE_TERMINATORS = /\b(but|however|otherwise|except|though|although|aside from|apart from)\b|[.;!?\n]/i;
+/** Negation/resolution stated AFTER the finding ("chest pain, now resolved") — the
+ *  backward-direction negation cues from the canonical table. */
+const POST_NEGATION: Cue[] = selectCues({ context: 'finding', category: 'negation', direction: 'backward' });
 
 const WINDOW = 60; // chars of left context to consider before a finding
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function cueRegex(cue: string): RegExp {
-  const e = escapeRe(cue);
-  if (cue.includes('/')) return new RegExp(`(^|[^a-z0-9])${e}(?=[^a-z0-9]|$)`, 'i');
-  return new RegExp(`\\b${e}\\b`, 'i');
-}
 
 /** Determine assertion from the left context immediately preceding a finding. */
 function scopeAssertion(leftContext: string): { status: AssertionStatus; evidence: string } | null {
@@ -96,22 +87,18 @@ function scopeAssertion(leftContext: string): { status: AssertionStatus; evidenc
   }
   for (const { status, cues } of SCOPE_TRIGGERS) {
     for (const cue of cues) {
-      if (cueRegex(cue).test(scope)) return { status, evidence: cue };
+      if (cue.re.test(scope)) return { status, evidence: cue.phrase };
     }
   }
   return null;
 }
-
-/** Negation/resolution stated AFTER the finding, e.g. "chest pain, now resolved" or
- *  "chest pain denied by patient". Scanned only up to the first scope terminator. */
-const POST_NEGATION = ['denied', 'resolved', 'ruled out', 'negative', 'no longer', 'not present', 'absent'];
 
 function scanRightNegation(rightContext: string): string | null {
   // Only the text before the first scope terminator belongs to this finding.
   const term = rightContext.match(SCOPE_TERMINATORS);
   const scope = term && term.index !== undefined ? rightContext.slice(0, term.index) : rightContext;
   for (const cue of POST_NEGATION) {
-    if (cueRegex(cue).test(scope)) return cue;
+    if (cue.re.test(scope)) return cue.phrase;
   }
   return null;
 }
@@ -127,7 +114,7 @@ export function extractFindings({ headingPath, content }: { headingPath: string[
 
   for (const { name, aliases } of HIGH_RISK_FINDINGS) {
     for (const surface of [name, ...(aliases || [])]) {
-      const re = new RegExp(`\\b${escapeRe(surface)}\\b`, 'gi');
+      const re = new RegExp(`\\b${escapeCue(surface)}\\b`, 'gi');
       let m: RegExpExecArray | null;
       while ((m = re.exec(content)) !== null) {
         const end = m.index + m[0].length;

@@ -20,6 +20,7 @@
  * to re-embed already-indexed files; bumping this only protects against silently
  * reusing a stale vector for a chunk that does get reprocessed.
  */
+import { selectCues } from '../assertion/cues.js';
 
 /** Bump when the rendering output for the same input changes. */
 export const RENDER_VERSION = 2;
@@ -29,30 +30,16 @@ export interface RenderInput {
   content: string;
 }
 
-/**
- * Heading cues that imply the listed/described findings are ABSENT or denied.
- * Matched case-insensitively against the joined heading path.
- *
- * These are deliberately STRONG, multi-word (or unambiguous) cues. FOOTNOTE indexes
- * general documentation, not just clinical notes, so single common words are avoided:
- * bare "absent"/"without"/"negatives" would mislabel everyday headings ("Without Loss
- * of Generality", "Negative Feedback") and inject a false clinical preamble into their
- * embeddings. Only phrases that are overwhelmingly clinical-negation survive here.
- */
-// Note: "rule out" / "r/o" are intentionally NOT here — clinically they mean the
-// finding is being *considered* (a differential), not denied. They map to "possible"
-// in the body-level assertion scan, not to negation at the heading level.
-const NEGATION_CUE =
-  /\b(negative for|pertinent negatives|denies|denied|no known|no evidence of|absence of|within normal limits|wnl|unremarkable|none reported)\b/i;
-
-/**
- * Heading cues that imply the listed/described findings are PRESENT or reported.
- * Same principle as NEGATION_CUE — strong multi-word cues only. Bare "present",
- * "positives", or "reports" are excluded because they match ubiquitous non-clinical
- * headings ("History of Present Illness", "Positive Feedback", "Annual Reports").
- */
-const PRESENCE_CUE =
-  /\b(positive for|pertinent positives|complains? of|c\/o|presents? with)\b/i;
+// Heading-level cues come from the canonical cue table (src/assertion/cues.ts),
+// filtered to the "heading" tier: deliberately STRONG, multi-word (or unambiguous)
+// clinical phrases only. FOOTNOTE indexes general documentation, so single common
+// words ("no", "without", "present", "reports") are NOT heading-safe there — they'd
+// mislabel everyday headings ("Without Loss of Generality", "Positive Feedback").
+// "rule out" / "r/o" are also excluded from the heading tier: clinically they mean the
+// finding is being *considered* (a differential), not denied — they map to "possible"
+// at the body level instead.
+const HEADING_NEGATION = selectCues({ context: 'heading', category: 'negation' });
+const HEADING_PRESENCE = selectCues({ context: 'heading', category: 'presence' });
 
 export type AssertionPolarity = 'absent' | 'present' | null;
 
@@ -62,8 +49,8 @@ export type AssertionPolarity = 'absent' | 'present' | null;
  */
 export function assertionPolarity(headingPath: string[]): AssertionPolarity {
   const joined = headingPath.join(' ');
-  if (NEGATION_CUE.test(joined)) return 'absent';
-  if (PRESENCE_CUE.test(joined)) return 'present';
+  if (HEADING_NEGATION.some(c => c.re.test(joined))) return 'absent';
+  if (HEADING_PRESENCE.some(c => c.re.test(joined))) return 'present';
   return null;
 }
 

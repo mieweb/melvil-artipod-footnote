@@ -24,6 +24,7 @@
  * docs get no assertion.
  */
 import { assertionPolarity } from '../render/embedding-text.js';
+import { selectCues, type Cue } from './cues.js';
 
 export type AssertionStatus = 'present' | 'absent' | 'possible' | 'historical' | 'unspecified';
 
@@ -41,33 +42,22 @@ export interface AssertionInput {
 }
 
 /**
- * Body cue phrases per status. STRONG clinical idioms only — see the SAFETY note above.
- * Order of the categories here also encodes precedence (see detectAssertion).
+ * Chunk-level body cues per status, from the canonical cue table (chunk tier — STRONG
+ * idioms only; no bare "no"/"not", which would false-fire on a whole-chunk scan).
+ * Order here encodes precedence: uncertainty first, so "cannot rule out X" reads as
+ * possible even when a negation-ish phrase sits nearby.
  */
-const BODY_CUES: Array<{ status: Exclude<AssertionStatus, 'unspecified'>; cues: string[] }> = [
-  // Uncertainty first: "cannot rule out X" is possible, not absent, even though a
-  // negation-ish phrase sits nearby.
-  { status: 'possible', cues: ['cannot rule out', "can't rule out", 'rule out', 'r/o', 'differential diagnosis'] },
-  { status: 'absent', cues: ['denies', 'denied', 'negative for', 'no evidence of', 'ruled out', 'pertinent negatives', 'nkda', 'nka'] },
-  { status: 'historical', cues: ['h/o', 'hx of', 'past medical history', 'pmh', 'status post', 's/p'] },
-  { status: 'present', cues: ['positive for', 'complains of', 'c/o', 'presents with', 'pertinent positives'] },
+const BODY_CUES: Array<{ status: Exclude<AssertionStatus, 'unspecified'>; cues: Cue[] }> = [
+  { status: 'possible', cues: selectCues({ context: 'chunk', category: 'uncertainty' }) },
+  { status: 'absent', cues: selectCues({ context: 'chunk', category: 'negation' }) },
+  { status: 'historical', cues: selectCues({ context: 'chunk', category: 'historical' }) },
+  { status: 'present', cues: selectCues({ context: 'chunk', category: 'presence' }) },
 ];
-
-/** Escape a cue for use in a RegExp, and bound it so it matches as a phrase, not a substring. */
-function cueRegex(cue: string): RegExp {
-  const escaped = cue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Abbreviations containing "/" (c/o, r/o, h/o, s/p) can't use \b around the slash,
-  // so bound them by a non-alphanumeric or string edge instead.
-  if (cue.includes('/')) {
-    return new RegExp(`(^|[^a-z0-9])${escaped}(?=[^a-z0-9]|$)`, 'i');
-  }
-  return new RegExp(`\\b${escaped}\\b`, 'i');
-}
 
 /** Scan the chunk body for the first matching cue category (by precedence order). */
 function scanBody(content: string): { status: Exclude<AssertionStatus, 'unspecified'>; triggers: string[] } | null {
   for (const { status, cues } of BODY_CUES) {
-    const hits = cues.filter(c => cueRegex(c).test(content));
+    const hits = cues.filter(c => c.re.test(content)).map(c => c.phrase);
     if (hits.length > 0) return { status, triggers: hits };
   }
   return null;
