@@ -71,3 +71,10 @@ test('negation/resolution stated AFTER the finding is caught', () => {
   assert.equal(byName('Chest pain, now resolved.').get('chest pain'), 'absent');
   assert.equal(byName('Chest pain was denied by the patient.').get('chest pain'), 'absent');
 });
+
+test('pseudo-negations do not negate the finding (ConText refinement)', () => {
+  // "no increase in X" means X is present (just not worse); "not only X" affirms X.
+  // A naive "no"/"not" scanner would wrongly mark these absent.
+  assert.equal(byName('There is no increase in chest pain.').get('chest pain'), 'present');
+  assert.equal(byName('Not only chest pain but also new hemoptysis.').get('chest pain'), 'present');
+});

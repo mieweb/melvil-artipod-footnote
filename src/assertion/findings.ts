@@ -24,7 +24,8 @@
  */
 import { assertionPolarity } from '../render/embedding-text.js';
 import type { AssertionStatus } from './assertion.js';
-import { selectCues, escapeCue, SCOPE_TERMINATORS, type Cue } from './cues.js';
+import { escapeCue } from './cues.js';
+import { applyContext } from './context.js';
 
 export interface FindingAssertion {
   /** Canonical finding name (from the curated list). */
@@ -58,52 +59,6 @@ const HIGH_RISK_FINDINGS: Array<{ name: string; aliases?: string[] }> = [
 // list safely include them; see the SCOPE note above.
 
 /**
- * Left-context (forward) triggers, from the canonical cue table (finding tier — bare
- * "no"/"not" are safe here because they're anchored to a known finding). Order encodes
- * precedence: negation is the strongest local signal next to a finding.
- * (Post-position cues like "resolved"/"denied" are the backward set, handled below.)
- */
-const SCOPE_TRIGGERS: Array<{ status: AssertionStatus; cues: Cue[] }> = [
-  { status: 'absent', cues: selectCues({ context: 'finding', category: 'negation', direction: 'forward' }) },
-  { status: 'possible', cues: selectCues({ context: 'finding', category: 'uncertainty', direction: 'forward' }) },
-  { status: 'historical', cues: selectCues({ context: 'finding', category: 'historical', direction: 'forward' }) },
-  { status: 'present', cues: selectCues({ context: 'finding', category: 'presence', direction: 'forward' }) },
-];
-
-/** Negation/resolution stated AFTER the finding ("chest pain, now resolved") — the
- *  backward-direction negation cues from the canonical table. */
-const POST_NEGATION: Cue[] = selectCues({ context: 'finding', category: 'negation', direction: 'backward' });
-
-const WINDOW = 60; // chars of left context to consider before a finding
-
-/** Determine assertion from the left context immediately preceding a finding. */
-function scopeAssertion(leftContext: string): { status: AssertionStatus; evidence: string } | null {
-  // Cut the context at the nearest scope terminator, so "denies X but Y" doesn't
-  // leak the negation past the "but".
-  let scope = leftContext;
-  const term = [...leftContext.matchAll(new RegExp(SCOPE_TERMINATORS, 'gi'))].pop();
-  if (term && term.index !== undefined) {
-    scope = leftContext.slice(term.index + term[0].length);
-  }
-  for (const { status, cues } of SCOPE_TRIGGERS) {
-    for (const cue of cues) {
-      if (cue.re.test(scope)) return { status, evidence: cue.phrase };
-    }
-  }
-  return null;
-}
-
-function scanRightNegation(rightContext: string): string | null {
-  // Only the text before the first scope terminator belongs to this finding.
-  const term = rightContext.match(SCOPE_TERMINATORS);
-  const scope = term && term.index !== undefined ? rightContext.slice(0, term.index) : rightContext;
-  for (const cue of POST_NEGATION) {
-    if (cue.re.test(scope)) return cue.phrase;
-  }
-  return null;
-}
-
-/**
  * Extract per-finding assertions from a chunk. Returns one entry per (finding,
  * assertion) pair found; a finding asserted twice with the same status is deduped.
  */
@@ -117,21 +72,11 @@ export function extractFindings({ headingPath, content }: { headingPath: string[
       const re = new RegExp(`\\b${escapeCue(surface)}\\b`, 'gi');
       let m: RegExpExecArray | null;
       while ((m = re.exec(content)) !== null) {
-        const end = m.index + m[0].length;
-        const left = content.slice(Math.max(0, m.index - WINDOW), m.index);
-        const right = content.slice(end, end + WINDOW);
-        const scoped = scopeAssertion(left);
-        // Explicit negation/resolution on EITHER side makes the finding absent.
-        const postNeg = scanRightNegation(right);
-        let assertion: AssertionStatus;
-        let evidence: string;
-        if (postNeg) {
-          assertion = 'absent';
-          evidence = postNeg;
-        } else {
-          assertion = scoped?.status ?? headingPolarity ?? 'present';
-          evidence = scoped?.evidence ?? (headingPolarity ? 'heading' : 'stated');
-        }
+        // ConText engine decides this occurrence from its surrounding context; fall back
+        // to heading polarity, then to "present" (a bare, unmodified mention).
+        const ctx = applyContext(content, m.index, m.index + m[0].length);
+        const assertion: AssertionStatus = ctx?.status ?? headingPolarity ?? 'present';
+        const evidence = ctx?.evidence ?? (headingPolarity ? 'heading' : 'stated');
 
         const key = `${name}|${assertion}`;
         if (!seen.has(key)) {
