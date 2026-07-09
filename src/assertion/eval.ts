@@ -77,6 +77,12 @@ const CASES: Case[] = [
   { content: 'This is unlikely to be chest pain.', finding: 'chest pain', expected: 'possible', note: 'HARD: "unlikely" not a cue' },
   { content: 'Mother has a history of syncope; the patient does not.', finding: 'syncope', expected: 'absent', note: 'HARD: experiencer (family, not patient)' },
   { content: 'Chest pain was noted early in the visit, and after an extended and rather meandering discussion, it was ultimately ruled out.', finding: 'chest pain', expected: 'absent', note: 'HARD: negation beyond the scope window' },
+
+  // --- next tier: still expected to MISS (motivates a fuller ConText / temporality axis) ---
+  { content: 'Return to the ER if you develop chest pain.', finding: 'chest pain', expected: 'absent', note: 'HARD: hypothetical/conditional' },
+  { content: 'Will continue to monitor for hemoptysis.', finding: 'hemoptysis', expected: 'absent', note: 'HARD: future / monitoring, not current' },
+  { content: 'Her mother reports the patient now has syncope.', finding: 'syncope', expected: 'present', note: 'HARD: family member is the reporter, not the experiencer' },
+  { content: 'Cannot confirm chest pain at this time.', finding: 'chest pain', expected: 'possible', note: 'HARD: "cannot confirm" is not a listed cue' },
 ];
 
 // Deliberately naive baseline: any negation word anywhere → absent (no direction, no

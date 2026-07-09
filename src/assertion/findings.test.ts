@@ -78,3 +78,17 @@ test('pseudo-negations do not negate the finding (ConText refinement)', () => {
   assert.equal(byName('There is no increase in chest pain.').get('chest pain'), 'present');
   assert.equal(byName('Not only chest pain but also new hemoptysis.').get('chest pain'), 'present');
 });
+
+test('double negation resolves to present', () => {
+  assert.equal(byName('There is no evidence to suggest absence of chest pain.').get('chest pain'), 'present');
+});
+
+test('backward-direction uncertainty is caught ("X cannot be excluded")', () => {
+  assert.equal(byName('Chest pain cannot be excluded.').get('chest pain'), 'possible');
+  assert.equal(byName('This is unlikely to be chest pain.').get('chest pain'), 'possible');
+});
+
+test('experiencer: a family-history finding is not attributed to the patient', () => {
+  // "mother has a history of X" is about family — not present for the patient.
+  assert.equal(byName('Her mother has a history of syncope.').get('syncope'), 'absent');
+});
