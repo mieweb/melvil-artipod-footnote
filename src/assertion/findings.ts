@@ -26,13 +26,16 @@ import { assertionPolarity } from '../render/embedding-text.js';
 import type { AssertionStatus } from './assertion.js';
 import { escapeCue } from './cues.js';
 import { applyContext } from './context.js';
+import { applyTemporality, type Temporality } from './temporality.js';
 
 export interface FindingAssertion {
   /** Canonical finding name (from the curated list). */
   finding: string;
-  /** Assertion for THIS finding occurrence. */
+  /** Assertion for THIS finding occurrence (negation/certainty axis). */
   assertion: AssertionStatus;
-  /** How we decided: the trigger phrase, the heading, or 'stated' (bare mention). */
+  /** When the finding applies (orthogonal ConText axis): recent | historical | hypothetical. */
+  temporality: Temporality;
+  /** How we decided the assertion: the trigger phrase, the heading, or 'stated'. */
   evidence: string;
 }
 
@@ -77,11 +80,14 @@ export function extractFindings({ headingPath, content }: { headingPath: string[
         const ctx = applyContext(content, m.index, m.index + m[0].length);
         const assertion: AssertionStatus = ctx?.status ?? headingPolarity ?? 'present';
         const evidence = ctx?.evidence ?? (headingPolarity ? 'heading' : 'stated');
+        const { temporality } = applyTemporality(headingPath, content, m.index, m.index + m[0].length);
 
-        const key = `${name}|${assertion}`;
+        // Dedup on (finding, assertion, temporality) — the same finding can legitimately
+        // appear as e.g. present+historical and present+recent in one chunk.
+        const key = `${name}|${assertion}|${temporality}`;
         if (!seen.has(key)) {
           seen.add(key);
-          out.push({ finding: name, assertion, evidence });
+          out.push({ finding: name, assertion, temporality, evidence });
         }
       }
     }

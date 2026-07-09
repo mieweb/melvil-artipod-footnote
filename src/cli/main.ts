@@ -381,14 +381,16 @@ async function main(): Promise<void> {
           console.log(`   URL: ${result.url}`);
           console.log(`   Headings: ${result.headings.join(' > ')}`);
           // Per-finding assertions (Phase 2): each clinical finding tagged from the prose.
-          const findings = JSON.parse(result.findings || '[]') as Array<{ finding: string; assertion: string; evidence: string }>;
+          const findings = JSON.parse(result.findings || '[]') as Array<{ finding: string; assertion: string; temporality?: string; evidence: string }>;
           if (findings.length > 0) {
             console.log(`   Per-finding:`);
             for (const f of findings) {
               const ev = f.evidence === 'stated' ? 'no negation cue → present'
                 : f.evidence === 'heading' ? 'from the section heading'
                 : `cue: "${f.evidence}"`;
-              console.log(`     • ${f.finding} → ${f.assertion.toUpperCase()}  (${ev})`);
+              // Temporality is a separate axis; only surface it when it's not the default 'recent'.
+              const when = f.temporality && f.temporality !== 'recent' ? ` [${f.temporality}]` : '';
+              console.log(`     • ${f.finding} → ${f.assertion.toUpperCase()}${when}  (${ev})`);
             }
           }
           console.log('');

@@ -725,9 +725,14 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
     // prose. More precise than the chunk-level tag — a single passage can have both.
     let perFinding = '';
     try {
-      const fs = JSON.parse(r.findings || '[]') as Array<{ finding: string; assertion: string }>;
+      const fs = JSON.parse(r.findings || '[]') as Array<{ finding: string; assertion: string; temporality?: string }>;
       if (fs.length > 0) {
-        perFinding = '\n    Per-finding: ' + fs.map(f => `${f.finding} = ${f.assertion.toUpperCase()}`).join('; ');
+        perFinding = '\n    Per-finding: ' + fs.map(f => {
+          // Flag historical/hypothetical so the model doesn't report a past or conditional
+          // finding as a current one; 'recent' is the default and left unlabeled.
+          const when = f.temporality && f.temporality !== 'recent' ? ` (${f.temporality})` : '';
+          return `${f.finding} = ${f.assertion.toUpperCase()}${when}`;
+        }).join('; ');
       }
     } catch { /* ignore malformed findings */ }
     // Include full content so LLM can actually read the documents
