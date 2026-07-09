@@ -53,12 +53,18 @@ export function escapeCue(cue: string): string {
 /**
  * Phrase-bounded, case-insensitive matcher for a cue. Abbreviations containing "/"
  * (c/o, r/o, h/o, s/p) can't use \b around the slash, so they are bounded by a
- * non-alphanumeric char or string edge instead.
+ * non-alphanumeric char or string edge instead. Cues that START or END with a
+ * non-word char (e.g. "-ve for") get the same edge-bounding on that side, since \b
+ * does not fire between two non-word chars (a space and a leading "-").
  */
 export function cueRegex(cue: string): RegExp {
-  const e = escapeCue(cue);
+  // Match flexible whitespace between words — de-identified clinical notes routinely
+  // collapse to irregular spacing ("negative   for"), which a literal space would miss.
+  const e = escapeCue(cue).replace(/ /g, '\\s+');
   if (cue.includes('/')) return new RegExp(`(^|[^a-z0-9])${e}(?=[^a-z0-9]|$)`, 'i');
-  return new RegExp(`\\b${e}\\b`, 'i');
+  const left = /^[a-z0-9]/i.test(cue) ? '\\b' : '(?:^|[^a-z0-9])';
+  const right = /[a-z0-9]$/i.test(cue) ? '\\b' : '(?=[^a-z0-9]|$)';
+  return new RegExp(`${left}${e}${right}`, 'i');
 }
 
 const H: CueContext[] = ['heading', 'chunk', 'finding'];
@@ -72,6 +78,7 @@ const SPECS: CueSpec[] = [
   { phrase: 'denies', category: 'negation', direction: 'forward', contexts: H },
   { phrase: 'denied', category: 'negation', direction: 'both', contexts: H },
   { phrase: 'negative for', category: 'negation', direction: 'forward', contexts: H },
+  { phrase: '-ve for', category: 'negation', direction: 'forward', contexts: H }, // "-ve" = negative (clinical shorthand)
   { phrase: 'no evidence of', category: 'negation', direction: 'forward', contexts: H },
   { phrase: 'pertinent negatives', category: 'negation', direction: 'forward', contexts: HC },
   { phrase: 'no known', category: 'negation', direction: 'forward', contexts: ['heading'] },

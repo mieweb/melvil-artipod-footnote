@@ -60,7 +60,16 @@ function maskPseudoNegation(scope: string): string {
  * ConText axis. We fold it into the assertion (not-the-patient → not present for them).
  */
 const FAMILY_CONTEXT =
-  /\b(family history|fh of|fhx|father|mother|sister|brother|parent|sibling|son|daughter|aunt|uncle|grandmother|grandfather|maternal|paternal)\b/i;
+  /\b(family history|fh of|fhx|father|mother|sister|brother|parent|sibling|son|daughter|aunt|uncle|grandmother|grandfather|maternal|paternal)\b/gi;
+
+/**
+ * A re-anchor back to the patient. If one of these appears AFTER a family cue but before
+ * the finding, the finding is the patient's again, not the family member's — e.g.
+ * "family history of colon cancer (father) and a personal history of adenomatous polyps".
+ * Without this, the experiencer axis over-reaches and mislabels the patient's own finding.
+ */
+const PATIENT_REANCHOR =
+  /\b(personal history|the patient|patient's own|his own|her own|he has|she has|he reports|she reports)\b/gi;
 
 /** Left context: concept back to the nearest scope terminator (pseudo-negations masked). */
 function leftScope(text: string, conceptStart: number): string {
@@ -88,9 +97,15 @@ function rightScope(text: string, conceptEnd: number): string {
 export function applyContext(text: string, conceptStart: number, conceptEnd: number): ContextResult | null {
   const left = leftScope(text, conceptStart);
 
-  // Experiencer: a family-history context means the finding isn't the patient's.
-  if (FAMILY_CONTEXT.test(left)) {
-    return { status: 'absent', evidence: 'family history (not the patient)' };
+  // Experiencer: a family-history context means the finding isn't the patient's —
+  // UNLESS the text re-anchors to the patient after the family cue ("...and a personal
+  // history of X"), in which case the finding is the patient's own.
+  const fam = [...left.matchAll(FAMILY_CONTEXT)].pop();
+  if (fam) {
+    const reanchor = [...left.matchAll(PATIENT_REANCHOR)].pop();
+    if (!reanchor || reanchor.index! <= fam.index!) {
+      return { status: 'absent', evidence: 'family history (not the patient)' };
+    }
   }
 
   // Backward modifiers after the concept.
