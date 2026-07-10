@@ -60,7 +60,7 @@ function maskPseudoNegation(scope: string): string {
  * ConText axis. We fold it into the assertion (not-the-patient → not present for them).
  */
 const FAMILY_CONTEXT =
-  /\b(family history|fh of|fhx|father|mother|sister|brother|parent|sibling|son|daughter|aunt|uncle|grandmother|grandfather|maternal|paternal)\b/gi;
+  /\b(family history|fh of|fhx|father|mother|sister|brother|parent|sibling|son|daughter|aunt|uncle|grandmother|grandfather|grandparent|granddaughter|grandson|grandchild|maternal|paternal|wife|husband|spouse|partner|cousin|nephew|niece|twin|stepfather|stepmother|stepbrother|stepsister|stepson|stepdaughter|in-law|relative|guardian|caregiver)\b/gi;
 
 /**
  * A re-anchor back to the patient. If one of these appears AFTER a family cue but before

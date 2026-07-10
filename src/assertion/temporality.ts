@@ -61,6 +61,8 @@ const HYPOTHETICAL_CUES = [
   'call your doctor if', 'call the office if', 'seek care if', 'in case of',
   'in the event of', 'watch for', 'monitor for', 'look out for', 'as needed for',
   'prn for',
+  // anticipatory / at-risk — the finding is not present, it's a conditional future
+  'at risk for', 'at risk of',
 ].map(cueRegex);
 
 /** The clause around a finding, bounded by the nearest scope terminators. */
