@@ -92,3 +92,35 @@ test('experiencer: a family-history finding is not attributed to the patient', (
   // "mother has a history of X" is about family — not present for the patient.
   assert.equal(byName('Her mother has a history of syncope.').get('syncope'), 'absent');
 });
+
+// --- expanded dictionary + clinical-document gate (issue #15) ---
+
+test('unambiguous findings are detected on ANY document (no gate needed)', () => {
+  // "pulmonary embolism" has no non-clinical meaning, so it is safe everywhere.
+  const m = byName('History references a pulmonary embolism and atrial fibrillation.', ['Reference']);
+  assert.equal(m.get('pulmonary embolism'), 'present');
+  assert.equal(m.get('atrial fibrillation'), 'present');
+});
+
+test('ambiguous symptom words do NOT fire on general documents', () => {
+  // Dual-use words under a business heading must NOT be tagged as clinical findings.
+  const findings = extractFindings({
+    headingPath: ['Annual Report'],
+    content: 'The team showed no weakness and no fatigue; growth caused some shock but no depression.',
+  });
+  assert.deepEqual(findings, []);
+});
+
+test('ambiguous symptom words DO fire once the chunk is clinical', () => {
+  // "The patient denies…" trips the clinical gate, so the ambiguous list is applied.
+  const m = byName('The patient denies fever, cough, and weakness.', ['Note']);
+  assert.equal(m.get('fever'), 'absent');
+  assert.equal(m.get('cough'), 'absent');
+  assert.equal(m.get('weakness'), 'absent');
+});
+
+test('ambiguous symptoms under a clinical section heading get its polarity', () => {
+  const m = byName('Fever. Cough. Fatigue.', ['Review of Systems', 'Negative for']);
+  assert.equal(m.get('fever'), 'absent');
+  assert.equal(m.get('fatigue'), 'absent');
+});

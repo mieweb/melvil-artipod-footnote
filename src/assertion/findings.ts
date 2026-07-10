@@ -27,6 +27,8 @@ import type { AssertionStatus } from './assertion.js';
 import { escapeCue } from './cues.js';
 import { applyContext } from './context.js';
 import { applyTemporality, type Temporality } from './temporality.js';
+import { isClinicalContext } from './clinical-gate.js';
+import { matchGazetteer } from './gazetteer.js';
 
 export interface FindingAssertion {
   /** Canonical finding name (from the curated list). */
@@ -39,27 +41,81 @@ export interface FindingAssertion {
   evidence: string;
 }
 
+type Finding = { name: string; aliases?: string[] };
+
 /**
- * Curated high-risk clinical findings (illustrative subset — see SCOPE note).
- * Each entry is the canonical name; `aliases` are additional surface forms to match.
- * Skewed toward red-flag symptoms where present-vs-absent genuinely changes triage.
+ * UNAMBIGUOUS findings — medical jargon or clear multi-word phrases with no non-clinical
+ * meaning ("pulmonary embolism" never appears in a business report). Safe to scan on ANY
+ * document, so these run unconditionally.
  */
-const HIGH_RISK_FINDINGS: Array<{ name: string; aliases?: string[] }> = [
-  { name: 'saddle anesthesia' },
-  { name: 'bowel or bladder dysfunction', aliases: ['urinary retention', 'urinary incontinence', 'fecal incontinence', 'bladder dysfunction'] },
-  { name: 'progressive leg weakness', aliases: ['lower extremity weakness', 'leg weakness', 'bilateral leg weakness'] },
-  { name: 'chest pain', aliases: ['chest pressure'] },
-  { name: 'shortness of breath', aliases: ['dyspnea'] },
-  { name: 'suicidal ideation' },
-  { name: 'hemoptysis' },
+const UNAMBIGUOUS_FINDINGS: Finding[] = [
+  // cardiac / vascular
+  { name: 'chest pain', aliases: ['chest pressure', 'substernal chest pain'] },
+  { name: 'myocardial infarction', aliases: ['heart attack'] },
+  { name: 'angina' }, { name: 'palpitations' }, { name: 'atrial fibrillation' },
+  { name: 'aortic dissection' }, { name: 'cardiac arrest' }, { name: 'congestive heart failure' },
+  { name: 'tachycardia' }, { name: 'bradycardia' }, { name: 'claudication' },
+  { name: 'deep vein thrombosis', aliases: ['dvt'] },
+  // pulmonary
+  { name: 'shortness of breath', aliases: ['dyspnea', 'dyspnea on exertion'] },
+  { name: 'hemoptysis' }, { name: 'pulmonary embolism' }, { name: 'pneumothorax' },
+  { name: 'pleural effusion' }, { name: 'pneumonia' }, { name: 'respiratory distress' },
+  // neuro
   { name: 'syncope', aliases: ['loss of consciousness'] },
-  { name: 'severe headache', aliases: ['thunderclap headache', 'worst headache of life'] },
-  { name: 'vision loss', aliases: ['visual loss', 'loss of vision'] },
+  { name: 'saddle anesthesia' }, { name: 'cauda equina' },
   { name: 'focal neurological deficit', aliases: ['focal neurologic deficit'] },
+  { name: 'subarachnoid hemorrhage' }, { name: 'intracranial hemorrhage' },
+  { name: 'altered mental status' }, { name: 'aphasia' }, { name: 'dysarthria' },
+  { name: 'ataxia' }, { name: 'hemiparesis' }, { name: 'hemiplegia' },
+  { name: 'transient ischemic attack', aliases: ['tia'] },
+  { name: 'ischemic stroke' }, { name: 'hemorrhagic stroke' }, { name: 'cerebrovascular accident' },
+  { name: 'meningitis' }, { name: 'encephalopathy' }, { name: 'paresthesia' },
+  { name: 'radiculopathy' }, { name: 'vertigo' },
+  { name: 'severe headache', aliases: ['thunderclap headache', 'worst headache of life'] },
+  { name: 'diplopia' }, { name: 'vision loss', aliases: ['visual loss', 'loss of vision'] },
+  { name: 'progressive leg weakness', aliases: ['lower extremity weakness', 'bilateral leg weakness'] },
+  // GI
+  { name: 'hematemesis' }, { name: 'melena' }, { name: 'hematochezia' },
+  { name: 'abdominal pain' }, { name: 'appendicitis' }, { name: 'pancreatitis' },
+  { name: 'bowel obstruction' }, { name: 'cholecystitis' }, { name: 'diverticulitis' },
+  { name: 'gastrointestinal bleeding', aliases: ['gi bleed'] }, { name: 'peritonitis' },
+  { name: 'ascites' }, { name: 'jaundice' },
+  // GU / renal
+  { name: 'hematuria' }, { name: 'dysuria' }, { name: 'oliguria' },
+  { name: 'acute kidney injury' }, { name: 'urinary retention' },
+  { name: 'urinary incontinence' }, { name: 'fecal incontinence' },
+  // heme / onc / metabolic / infectious
+  { name: 'anemia' }, { name: 'thrombocytopenia' }, { name: 'neutropenia' },
+  { name: 'leukocytosis' }, { name: 'lymphadenopathy' }, { name: 'splenomegaly' },
+  { name: 'diabetic ketoacidosis', aliases: ['dka'] }, { name: 'hypoglycemia' },
+  { name: 'hyperkalemia' }, { name: 'hyponatremia' },
+  { name: 'sepsis' }, { name: 'septic shock' }, { name: 'bacteremia' },
+  { name: 'cellulitis' }, { name: 'osteomyelitis' }, { name: 'endocarditis' },
+  { name: 'tuberculosis' }, { name: 'abscess' },
+  // derm / other red flags
+  { name: 'cyanosis' }, { name: 'petechiae' }, { name: 'ecchymosis' },
+  { name: 'compartment syndrome' }, { name: 'night sweats' }, { name: 'unintentional weight loss' },
+  // psych
+  { name: 'suicidal ideation' }, { name: 'homicidal ideation' },
+  { name: 'psychosis' }, { name: 'hallucinations' },
 ];
-// NOTE: intentionally omitting common dual-use terms (e.g. "fever", "SOB", "SI") that
-// would false-fire on general documentation. A clinical-document gate would let the
-// list safely include them; see the SCOPE note above.
+
+/**
+ * AMBIGUOUS findings — common single words that ALSO have everyday meanings ("weakness",
+ * "discharge", "shock"). Only scanned when the clinical-document gate says the chunk is
+ * clinical, so they never fire on general prose.
+ */
+const AMBIGUOUS_FINDINGS: Finding[] = [
+  { name: 'fever' }, { name: 'chills' }, { name: 'cough' }, { name: 'nausea' },
+  { name: 'vomiting' }, { name: 'diarrhea' }, { name: 'constipation' }, { name: 'dizziness' },
+  { name: 'fatigue' }, { name: 'weakness' }, { name: 'headache' }, { name: 'rash' },
+  { name: 'edema', aliases: ['swelling'] }, { name: 'numbness' }, { name: 'tingling' },
+  { name: 'bleeding' }, { name: 'bruising' }, { name: 'confusion' }, { name: 'tremor' },
+  { name: 'seizure' }, { name: 'stroke' }, { name: 'shock' }, { name: 'discharge' },
+  { name: 'wheezing' }, { name: 'malaise' }, { name: 'weight loss' }, { name: 'weight gain' },
+  { name: 'depression' }, { name: 'anxiety' }, { name: 'insomnia' }, { name: 'fainting' },
+  { name: 'bowel or bladder dysfunction', aliases: ['bladder dysfunction'] },
+];
 
 /**
  * Extract per-finding assertions from a chunk. Returns one entry per (finding,
@@ -70,7 +126,14 @@ export function extractFindings({ headingPath, content }: { headingPath: string[
   const out: FindingAssertion[] = [];
   const seen = new Set<string>();
 
-  for (const { name, aliases } of HIGH_RISK_FINDINGS) {
+  // Unambiguous findings run on any doc; ambiguous (dual-use) symptom words only when the
+  // chunk is confidently clinical, so general prose never gets clinical assertions.
+  const clinical = isClinicalContext(headingPath, content);
+  const dictionary = clinical
+    ? [...UNAMBIGUOUS_FINDINGS, ...AMBIGUOUS_FINDINGS]
+    : UNAMBIGUOUS_FINDINGS;
+
+  for (const { name, aliases } of dictionary) {
     for (const surface of [name, ...(aliases || [])]) {
       const re = new RegExp(`\\b${escapeCue(surface)}\\b`, 'gi');
       let m: RegExpExecArray | null;
@@ -92,5 +155,22 @@ export function extractFindings({ headingPath, content }: { headingPath: string[
       }
     }
   }
+
+  // Broad condition gazetteer (~2,400 common conditions) — clinical context only, so it
+  // never fires on general docs. Same per-finding assertion + temporality as above.
+  if (clinical) {
+    for (const gm of matchGazetteer(content)) {
+      const ctx = applyContext(content, gm.start, gm.end);
+      const assertion: AssertionStatus = ctx?.status ?? headingPolarity ?? 'present';
+      const evidence = ctx?.evidence ?? (headingPolarity ? 'heading' : 'stated');
+      const { temporality } = applyTemporality(headingPath, content, gm.start, gm.end);
+      const key = `${gm.finding}|${assertion}|${temporality}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({ finding: gm.finding, assertion, temporality, evidence });
+      }
+    }
+  }
+
   return out;
 }
