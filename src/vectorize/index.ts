@@ -3,6 +3,8 @@
  */
 export * from './types.js';
 export { createLocalIndex, LocalVectorizeIndex } from './local-index.js';
+export { footnoteVectorDriver } from './cloud-driver.js';
+export type { FootnoteBindingConfig, CloudDriverContext } from './cloud-driver.js';
 export type { CreateLocalIndexOptions } from './local-index.js';
 export { VectorizeStore } from './store.js';
 export type { VectorizeStoreOptions } from './store.js';
