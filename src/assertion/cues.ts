@@ -130,6 +130,10 @@ const SPECS: CueSpec[] = [
   { phrase: 'thought to be', category: 'uncertainty', direction: 'both', contexts: F },
   { phrase: 'working diagnosis', category: 'uncertainty', direction: 'both', contexts: F },
   { phrase: 'raises the possibility', category: 'uncertainty', direction: 'forward', contexts: F },
+  { phrase: 'suspicion of', category: 'uncertainty', direction: 'forward', contexts: F },
+  { phrase: 'suspicious for', category: 'uncertainty', direction: 'forward', contexts: F },
+  { phrase: 'compatible with', category: 'uncertainty', direction: 'forward', contexts: F },
+  { phrase: 'suspect', category: 'uncertainty', direction: 'both', contexts: F },
 
   // ---- Historical (→ historical) ----
   { phrase: 'h/o', category: 'historical', direction: 'forward', contexts: CF },
