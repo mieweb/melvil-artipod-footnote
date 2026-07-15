@@ -116,18 +116,38 @@ console.log(`  accuracy : ${p2(correct, events.length)}   precision: ${p2(tp, tp
 console.log(`  (NegEx was P 95.1 / R 98.0 / F1 96.5 — does it hold on a different corpus?)`);
 void f1;
 
-// === HYPOTHETICAL axis (first real validation) ===
-const hypRows = events.filter(e => e.modality.startsWith('HYPOTHETICAL'));
-let hypHit = 0;
-for (const e of hypRows) {
-  if (applyTemporality([], e.sofa, e.begin, e.end).temporality === 'hypothetical') hypHit++;
+// === MODALITY axes — map E3C labels to the engine's ACTUAL concepts ===
+//
+// E3C's contextualModality is not a temporality axis, and its labels do not all mean what
+// our engine means. Mapping honestly (only the aligned subsets are scored):
+//   HYPOTHETICAL-IF    (few)  -> our 'hypothetical' — true conditionals ("if X…")   [aligned]
+//   HYPOTHETICAL-OTHER (many) -> differentials / plans / purposes                   [different construct — EXCLUDED, not scored as a miss]
+//   HEDGED                    -> our 'possible' — uncertainty ("suspected", "possible") [aligned]
+// The prior version lumped IF+OTHER together; since OTHER dominates and isn't our concept,
+// it produced a misleading 0%. Separating them is the honest fix.
+
+const ifRows = events.filter(e => e.modality === 'HYPOTHETICAL-IF');
+let ifHit = 0;
+for (const e of ifRows) {
+  if (applyTemporality([], e.sofa, e.begin, e.end).temporality === 'hypothetical') ifHit++;
 }
-let hypFP = 0;
-const nonHyp = events.filter(e => !e.modality.startsWith('HYPOTHETICAL'));
-for (const e of nonHyp) {
-  if (applyTemporality([], e.sofa, e.begin, e.end).temporality === 'hypothetical') hypFP++;
+
+const hedged = events.filter(e => e.modality === 'HEDGED');
+let hedgedHit = 0;
+for (const e of hedged) {
+  if (applyContext(e.sofa, e.begin, e.end)?.status === 'possible') hedgedHit++;
 }
-console.log('\n  === HYPOTHETICAL axis — first English validation ===\n');
-console.log(`  Hypothetical recall : ${p2(hypHit, hypRows.length)} (${hypHit}/${hypRows.length})`);
-console.log(`  False-hypothetical  : ${p2(hypFP, nonHyp.length)} (${hypFP}/${nonHyp.length})`);
-console.log('  (small sample — a first signal, not a definitive number)\n');
+const actual = events.filter(e => e.modality === 'ACTUAL');
+let possFP = 0;
+for (const e of actual) {
+  if (applyContext(e.sofa, e.begin, e.end)?.status === 'possible') possFP++;
+}
+
+console.log("\n  === Modality axes (E3C labels mapped to the engine's real concepts) ===\n");
+console.log(`  Conditional "hypothetical" (HYPOTHETICAL-IF): recall ${p2(ifHit, ifRows.length)} (${ifHit}/${ifRows.length})`);
+console.log(`      — only ${ifRows.length} such events in E3C: too few to conclude, a spot check at best.`);
+console.log(`  Uncertainty "possible" (HEDGED):              recall ${p2(hedgedHit, hedged.length)} (${hedgedHit}/${hedged.length})`);
+console.log(`      — the real signal E3C offers for the modality axes.`);
+console.log(`  False-possible on ACTUAL events:             ${p2(possFP, actual.length)} (${possFP}/${actual.length})  (precision proxy — lower is better)`);
+console.log('\n  Excluded: HYPOTHETICAL-OTHER (differentials / plans / suspicions) is a different');
+console.log('  construct than our conditional "hypothetical", so it is not scored as a miss.\n');
