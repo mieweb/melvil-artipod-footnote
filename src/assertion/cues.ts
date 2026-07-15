@@ -122,6 +122,14 @@ const SPECS: CueSpec[] = [
   { phrase: 'cannot be excluded', category: 'uncertainty', direction: 'backward', contexts: CF },
   { phrase: "can't be excluded", category: 'uncertainty', direction: 'backward', contexts: CF },
   { phrase: 'unlikely', category: 'uncertainty', direction: 'both', contexts: F },
+  { phrase: 'suggesting', category: 'uncertainty', direction: 'forward', contexts: F },
+  { phrase: 'suggestive of', category: 'uncertainty', direction: 'forward', contexts: F },
+  { phrase: 'consistent with', category: 'uncertainty', direction: 'forward', contexts: F },
+  { phrase: 'presumed', category: 'uncertainty', direction: 'forward', contexts: F },
+  { phrase: 'presumptive', category: 'uncertainty', direction: 'forward', contexts: F },
+  { phrase: 'thought to be', category: 'uncertainty', direction: 'both', contexts: F },
+  { phrase: 'working diagnosis', category: 'uncertainty', direction: 'both', contexts: F },
+  { phrase: 'raises the possibility', category: 'uncertainty', direction: 'forward', contexts: F },
 
   // ---- Historical (→ historical) ----
   { phrase: 'h/o', category: 'historical', direction: 'forward', contexts: CF },
