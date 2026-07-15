@@ -15,12 +15,44 @@
  */
 import { readFileSync } from 'node:fs';
 
-const TERMS: Set<string> = new Set(
+/** Normalize a term to the matcher's phrase shape: lowercase, [a-z0-9]+ tokens, single-spaced. */
+function normalizeTerm(s: string): string {
+  return (s.toLowerCase().match(/[a-z0-9]+/g) ?? []).join(' ');
+}
+
+/**
+ * Build the lookup set from the raw NLM list.
+ *
+ * NLM ships terms in an inverted, punctuated form ("acidosis - lactic",
+ * "adenocarcinoma in-situ") that can never equal a token-joined phrase from prose — so
+ * ~22% of the raw list (432 inverted + others) was previously unmatchable dead weight.
+ * For every raw term we store its normalized token-join form, and — for inverted
+ * "main - modifier" entries — additionally the de-inverted natural-order form
+ * ("acidosis - lactic" -> "lactic acidosis"), which is what actually appears in prose.
+ */
+function buildTerms(raw: string[]): Set<string> {
+  const set = new Set<string>();
+  for (const term of raw) {
+    const straight = normalizeTerm(term);
+    if (straight) set.add(straight);
+    if (term.includes(' - ')) {
+      const deInverted = normalizeTerm(term.split(' - ').reverse().join(' '));
+      if (deInverted) set.add(deInverted);
+    }
+  }
+  return set;
+}
+
+const TERMS: Set<string> = buildTerms(
   JSON.parse(readFileSync(new URL('./conditions.json', import.meta.url), 'utf8')) as string[],
 );
 
-/** Longest term is 5 words; cap n-gram length there. */
-const MAX_N = 5;
+/**
+ * Cap n-gram length at the longest stored term. Data-driven (not a hard-coded 5) because
+ * normalizing punctuation can lengthen a term (e.g. "…s/p tpa" -> "…s p tpa"); bounded at 8
+ * so a pathological entry can't blow up per-token cost.
+ */
+const MAX_N = Math.min(8, Math.max(1, ...Array.from(TERMS, t => t.split(' ').length)));
 
 export interface GazetteerMatch {
   finding: string;
