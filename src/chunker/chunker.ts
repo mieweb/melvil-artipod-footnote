@@ -90,29 +90,167 @@ function finalizeChunk(params: {
 }
 
 /**
- * Split text into sentences (roughly)
+ * Grammar-aware sentence splitter (chunking direction #2).
+ *
+ * Splits text into sentence-ish units WITHOUT cutting inside a balanced span:
+ * parentheses `()`, brackets `[]`, braces `{}`, double quotes (straight or smart),
+ * inline code (backtick), or a fenced code block (``` / ~~~). A split is only taken
+ * at "depth 0" — every counter closed and no open quote/code context. A boundary is
+ * either a sentence terminator (`.!?`) that is followed by whitespace/end (so decimals
+ * like `1.5` and abbreviations mid-token are not cut), or a newline.
+ *
+ * Fallback: a single balanced span that grows past the size budget (`maxUnitChars`)
+ * is force-split at the next whitespace even at depth > 0, so a giant parenthetical,
+ * an unbalanced quote, or a huge code block can never produce one unbounded unit.
+ *
+ * Notes / deliberate limits:
+ *  - Single quotes / apostrophes are NOT tracked — in English "don't", "patients'"
+ *    would otherwise open phantom quote spans. Only double quotes are balanced.
+ *  - An unbalanced delimiter (a stray `"` inch-mark, an unclosed `(`) degrades to the
+ *    size-budget fallback rather than swallowing the rest of the text.
+ *  - Inline code auto-closes at a newline (markdown inline code never spans lines).
  */
-function splitIntoSentences(text: string): string[] {
-  // Split on sentence boundaries while preserving them
-  const sentences: string[] = [];
-  const pattern = /[^.!?\n]+[.!?\n]+|[^.!?\n]+$/g;
-  let match;
-  
-  while ((match = pattern.exec(text)) !== null) {
-    const sentence = match[0].trim();
-    if (sentence) {
-      sentences.push(sentence);
+export function splitIntoSentences(text: string, maxUnitChars: number = Infinity): string[] {
+  const OPEN: Record<string, 'round' | 'square' | 'curly'> = { '(': 'round', '[': 'square', '{': 'curly' };
+  const CLOSE: Record<string, 'round' | 'square' | 'curly'> = { ')': 'round', ']': 'square', '}': 'curly' };
+
+  const units: string[] = [];
+  let buf = '';
+  const depth = { round: 0, square: 0, curly: 0 };
+  let inQuote = false;      // straight or smart double quote
+  let inInlineCode = false; // single-backtick span (within a line)
+  let inFence = false;      // ``` or ~~~ fenced code block
+
+  const depthZero = () =>
+    depth.round === 0 && depth.square === 0 && depth.curly === 0 &&
+    !inQuote && !inInlineCode && !inFence;
+
+  const flush = () => {
+    const t = buf.trim();
+    if (t) units.push(t);
+    buf = '';
+  };
+
+  const n = text.length;
+  let i = 0;
+  let atLineStart = true;
+
+  while (i < n) {
+    // Fenced code block toggling — detected at the start of a line.
+    if (atLineStart && !inInlineCode) {
+      let eol = text.indexOf('\n', i);
+      if (eol === -1) eol = n;
+      if (/^\s*(`{3,}|~{3,})/.test(text.slice(i, eol))) {
+        inFence = !inFence;
+        buf += text.slice(i, eol); // keep the fence marker line with the code unit
+        i = eol;
+        atLineStart = false;
+        continue;
+      }
     }
+
+    const c = text[i];
+
+    // Inside a fence, nothing is a boundary; content is copied verbatim.
+    if (inFence) {
+      buf += c;
+      atLineStart = c === '\n';
+      i++;
+      if (buf.length >= maxUnitChars && /\s/.test(c)) flush();
+      continue;
+    }
+
+    // Inline code span (single backtick). Auto-closes at a newline.
+    if (c === '`') {
+      inInlineCode = !inInlineCode;
+      buf += c;
+      atLineStart = false;
+      i++;
+      continue;
+    }
+    if (inInlineCode) {
+      if (c === '\n') inInlineCode = false;
+      buf += c;
+      atLineStart = c === '\n';
+      i++;
+      continue;
+    }
+
+    // Double quotes: straight toggles; smart quotes are directional.
+    if (c === '"') { inQuote = !inQuote; buf += c; atLineStart = false; i++; continue; }
+    if (c === '“') { inQuote = true; buf += c; atLineStart = false; i++; continue; }
+    if (c === '”') { inQuote = false; buf += c; atLineStart = false; i++; continue; }
+
+    // Bracket depth.
+    if (OPEN[c]) { depth[OPEN[c]]++; buf += c; atLineStart = false; i++; continue; }
+    if (CLOSE[c]) { if (depth[CLOSE[c]] > 0) depth[CLOSE[c]]--; buf += c; atLineStart = false; i++; continue; }
+
+    // Newline: a boundary only at depth 0.
+    if (c === '\n') {
+      buf += c;
+      atLineStart = true;
+      i++;
+      if (depthZero()) flush();
+      else if (buf.length >= maxUnitChars) flush(); // fallback for an oversized open span
+      continue;
+    }
+
+    // Sentence terminator: a boundary only at depth 0 AND when followed by whitespace/end
+    // (so `1.5`, `e.g.`, `U.S.A` mid-token are not cut).
+    if ((c === '.' || c === '!' || c === '?') && depthZero()) {
+      let j = i;
+      while (j < n && (text[j] === '.' || text[j] === '!' || text[j] === '?')) j++;
+      buf += text.slice(i, j);
+      const next = j < n ? text[j] : '';
+      i = j;
+      atLineStart = false;
+      if (next === '' || /\s/.test(next)) flush();
+      continue;
+    }
+
+    // Default: accumulate. Size-budget fallback fires at a whitespace boundary.
+    buf += c;
+    atLineStart = false;
+    i++;
+    if (buf.length >= maxUnitChars && /\s/.test(c)) flush();
   }
-  
-  return sentences;
+
+  flush();
+  return units;
 }
 
 /**
- * Split text into paragraphs
+ * Split text into paragraphs on blank lines — but never break inside a fenced code
+ * block (``` / ~~~), whose internal blank lines are part of the code, not paragraph
+ * separators. Finer delimiter handling (parens/quotes/inline code) is left to the
+ * sentence splitter; paragraph splitting only guards the fence case, which is the one
+ * place a blank-line split would corrupt structure.
  */
-function splitIntoParagraphs(text: string): string[] {
-  return text.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 0);
+export function splitIntoParagraphs(text: string): string[] {
+  const paras: string[] = [];
+  let cur: string[] = [];
+  let inFence = false;
+
+  const flush = () => {
+    const p = cur.join('\n').trim();
+    if (p) paras.push(p);
+    cur = [];
+  };
+
+  for (const line of text.split('\n')) {
+    if (/^\s*(`{3,}|~{3,})/.test(line)) {
+      inFence = !inFence;
+      cur.push(line);
+      continue;
+    }
+    if (!inFence && line.trim() === '') {
+      flush();
+    } else {
+      cur.push(line);
+    }
+  }
+  flush();
+  return paras;
 }
 
 /**
@@ -218,8 +356,10 @@ export function chunkSection(
 
   for (const chunk of paragraphChunks) {
     if (chunk.tokenCount > config.maxTokens * 1.2) {
-      // Chunk is too large, split by sentences
-      const sentences = splitIntoSentences(chunk.content);
+      // Chunk is too large, split by sentences. The size-budget fallback (~4 chars/token,
+      // matching estimateTokens) force-splits any single balanced span that is itself
+      // larger than the chunk budget, so grammar-awareness can never yield an unbounded unit.
+      const sentences = splitIntoSentences(chunk.content, config.maxTokens * 4);
       const sentenceChunks = packWithOverlap(sentences, config.maxTokens, config.overlap, headingPath, docTitle);
       result.push(...sentenceChunks);
     } else {
