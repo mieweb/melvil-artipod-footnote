@@ -1,11 +1,13 @@
 /**
  * Context-Aware Embedding Text Rendering
  *
- * The vector text for a chunk is NOT the raw body. We prepend the chunk's heading
- * ancestry and, when a heading carries an assertion cue (e.g. "Negative for",
- * "Denies"), a short polarity preamble. This keeps the *meaning* of section scope
- * in the embedding so that a denied finding under `### Negative for:` does not embed
- * as a free-floating positive concept.
+ * The vector text for a chunk is NOT the raw body. We prepend the source document's
+ * human-readable title, the chunk's heading ancestry and, when a heading carries an
+ * assertion cue (e.g. "Negative for", "Denies"), a short polarity preamble. This keeps
+ * the *meaning* of document + section scope in the embedding so that a denied finding
+ * under `### Negative for:` does not embed as a free-floating positive concept, and so
+ * that a chunk carries the topical signal of the file it came from (e.g. a bare
+ * "Recommendations" section embeds under its report's subject, not in a vacuum).
  *
  * Raw chunk content is left untouched — it is what gets stored, displayed, cited,
  * and indexed for FTS/literal search. Only the embedding input is rendered.
@@ -23,9 +25,16 @@
 import { selectCues } from '../assertion/cues.js';
 
 /** Bump when the rendering output for the same input changes. */
-export const RENDER_VERSION = 2;
+export const RENDER_VERSION = 3;
 
 export interface RenderInput {
+  /**
+   * Source document's human-readable title or basename (extension stripped), e.g.
+   * "Discharge Summary" or "IOMSC-WG-Mental Health-V3". Optional and prepended to the
+   * embedding input as a `Source:` line — the same idea as the heading trail, one level
+   * up. Pass the title/basename, NOT a long absolute path (path noise dilutes the vector).
+   */
+  docTitle?: string;
   headingPath: string[];
   content: string;
 }
@@ -60,12 +69,17 @@ const PREAMBLE: Record<'absent' | 'present', string> = {
 };
 
 /**
- * Render the embedding input for a chunk: heading ancestry + optional polarity
- * preamble + the raw body. Deterministic and human-readable.
+ * Render the embedding input for a chunk: optional source title + heading ancestry +
+ * optional polarity preamble + the raw body. Deterministic and human-readable.
  */
-export function renderEmbeddingText({ headingPath, content }: RenderInput): string {
+export function renderEmbeddingText({ docTitle, headingPath, content }: RenderInput): string {
   const path = headingPath.filter(Boolean);
   const lines: string[] = [];
+
+  const title = docTitle?.trim();
+  if (title) {
+    lines.push(`Source: ${title}.`);
+  }
 
   if (path.length > 0) {
     lines.push(`Section: ${path.join(' > ')}.`);

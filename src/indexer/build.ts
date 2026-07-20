@@ -256,18 +256,22 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
         store.deleteByChunkIds(existingInfo.chunkIds);
       }
 
+      // Human-readable document title: front-matter title if present, else the
+      // basename with its extension stripped (PDFs/DOCX/plaintext have no front matter).
+      // Folded into each chunk's embedding text (Source: line) — never the raw body.
+      const title = frontMatter.title as string || path.basename(relativePath, path.extname(relativePath));
+
       // Chunk the document
       const chunks = chunkDocument(sections, {
         maxTokens: options.maxTokens,
         overlap: options.overlap
-      });
+      }, title);
 
       if (chunks.length === 0) continue;
 
       // Create chunk records
       const url = generateUrl(relativePath, options.content);
       const section = extractSection(relativePath, options.content);
-      const title = frontMatter.title as string || path.basename(relativePath, path.extname(relativePath));
       const tags = (frontMatter.tags as string[]) || [];
       const date = (frontMatter.date as string) || '';
 

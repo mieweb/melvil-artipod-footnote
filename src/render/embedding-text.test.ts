@@ -87,6 +87,38 @@ test('neutral heading gets a section label but no polarity claim', () => {
   assert.doesNotMatch(text, /denied or absent|present or reported/i);
 });
 
+test('docTitle is prepended as a Source line, above the section trail', () => {
+  const text = renderEmbeddingText({
+    docTitle: 'Discharge Summary',
+    headingPath: ['Assessment', 'Cardiac'],
+    content: 'Order MRI.',
+  });
+  // Source comes first, then the section trail — broad → specific.
+  assert.match(text, /^Source: Discharge Summary\.\nSection: Assessment > Cardiac\./);
+  assert.match(text, /Order MRI\./);
+});
+
+test('docTitle is optional — omitting it renders exactly as before (no Source line)', () => {
+  const withOut = renderEmbeddingText({ headingPath: ['Plan'], content: 'Order MRI.' });
+  assert.doesNotMatch(withOut, /^Source:/m);
+  assert.match(withOut, /^Section: Plan\./);
+});
+
+test('blank / whitespace-only docTitle does not emit a Source line', () => {
+  for (const t of ['', '   ', '\n\t']) {
+    const text = renderEmbeddingText({ docTitle: t, headingPath: ['Plan'], content: 'x' });
+    assert.doesNotMatch(text, /Source:/);
+  }
+});
+
+test('the same body under the same heading but different source docs embeds differently', () => {
+  const base = { headingPath: ['Recommendations'], content: '- Increase monitoring cadence.' };
+  const a = renderEmbeddingText({ ...base, docTitle: 'Climate Change Working Group' });
+  const b = renderEmbeddingText({ ...base, docTitle: 'Mental Health Working Group' });
+  // A bare "Recommendations" section should carry its report's subject into the vector.
+  assert.notEqual(a, b);
+});
+
 test('embedding hash input is versioned', () => {
   // Guards the cache-invalidation contract: the hashed string carries the version.
   assert.match(embeddingHashInput('hello'), new RegExp(`^v${RENDER_VERSION}\\n`));

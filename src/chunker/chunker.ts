@@ -60,8 +60,11 @@ function finalizeChunk(params: {
   headingPath: string[];
   content: string;
   tokenCount: number;
+  /** Source document title/basename, folded into embeddingText (not the raw body). */
+  docTitle?: string;
 }): Chunk {
   const embeddingText = renderEmbeddingText({
+    docTitle: params.docTitle,
     headingPath: params.headingPath,
     content: params.content
   });
@@ -119,7 +122,8 @@ function packWithOverlap(
   units: string[],
   maxTokens: number,
   overlapTokens: number,
-  headingPath: string[]
+  headingPath: string[],
+  docTitle?: string
 ): Chunk[] {
   const chunks: Chunk[] = [];
   let currentUnits: string[] = [];
@@ -137,7 +141,8 @@ function packWithOverlap(
         index: chunkIndex++,
         headingPath,
         content,
-        tokenCount: currentTokens
+        tokenCount: currentTokens,
+        docTitle
       }));
 
       // Calculate overlap: keep trailing units up to overlapTokens
@@ -169,7 +174,8 @@ function packWithOverlap(
       index: chunkIndex,
       headingPath,
       content,
-      tokenCount: currentTokens
+      tokenCount: currentTokens,
+      docTitle
     }));
   }
 
@@ -183,10 +189,11 @@ export function chunkSection(
   content: string,
   headingPath: string[],
   config: ChunkConfig,
-  startIndex: number = 0
+  startIndex: number = 0,
+  docTitle?: string
 ): Chunk[] {
   const paragraphs = splitIntoParagraphs(content);
-  
+
   if (paragraphs.length === 0) {
     return [];
   }
@@ -198,21 +205,22 @@ export function chunkSection(
       index: startIndex,
       headingPath,
       content: content.trim(),
-      tokenCount: totalTokens
+      tokenCount: totalTokens,
+      docTitle
     })];
   }
 
   // Try paragraph-level chunking first
-  const paragraphChunks = packWithOverlap(paragraphs, config.maxTokens, config.overlap, headingPath);
-  
+  const paragraphChunks = packWithOverlap(paragraphs, config.maxTokens, config.overlap, headingPath, docTitle);
+
   // Check if any paragraph is too large and needs sentence-level splitting
   const result: Chunk[] = [];
-  
+
   for (const chunk of paragraphChunks) {
     if (chunk.tokenCount > config.maxTokens * 1.2) {
       // Chunk is too large, split by sentences
       const sentences = splitIntoSentences(chunk.content);
-      const sentenceChunks = packWithOverlap(sentences, config.maxTokens, config.overlap, headingPath);
+      const sentenceChunks = packWithOverlap(sentences, config.maxTokens, config.overlap, headingPath, docTitle);
       result.push(...sentenceChunks);
     } else {
       result.push(chunk);
@@ -228,13 +236,14 @@ export function chunkSection(
  */
 export function chunkDocument(
   sections: Array<{ headingPath: string[]; content: string }>,
-  config: ChunkConfig
+  config: ChunkConfig,
+  docTitle?: string
 ): Chunk[] {
   const allChunks: Chunk[] = [];
   let globalIndex = 0;
 
   for (const section of sections) {
-    const sectionChunks = chunkSection(section.content, section.headingPath, config, globalIndex);
+    const sectionChunks = chunkSection(section.content, section.headingPath, config, globalIndex, docTitle);
     allChunks.push(...sectionChunks);
     globalIndex = allChunks.length;
   }
