@@ -30,3 +30,10 @@ data/*.txt
 
 # E3C corpus (CC BY-NC, fetched not vendored)
 data/e3c_en/
+
+# OCR spike artifacts: rendered page images + per-page duplicates (regenerate with
+# ocr-colab.py). The 3 ocr-gundam-results/*/FULL.md ARE tracked — bench-chunking.ts
+# reads them as the unlimited-ocr benchmark row's input.
+ocr-colab-results/
+ocr-space/
+ocr-gundam-results/*/page_*/
