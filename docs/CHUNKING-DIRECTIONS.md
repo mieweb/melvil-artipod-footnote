@@ -193,28 +193,47 @@ mode** on the *same* free T4 fixed it — output ≈ A100 Space quality. So chea
 self-hosting is viable ONLY with the right pipeline (crop mode + a heading shim +
 output validation).
 
-**Benchmark row (3-way, same 12 questions, whole-corpus retrieval).** retr@4 is pure
-vector math (referee-independent); answer/5 is graded by the "referee" model:
+**Full benchmark (5 parsers, same 12 questions, whole-corpus retrieval, Haiku referee).**
+retr@4 is pure vector math (no model in the scoring); answer/5 is model-graded:
 
-| parser | answer/5 (qwen judge) | answer/5 (Haiku judge) | retr@4 | chunks |
-|---|---|---|---|---|
-| heuristic (current) | 4.00 | 3.67 | 50% | 37 |
-| ai-md qwen7b (naive) | 3.67 | 3.67 | 42% | 37 |
-| **unlimited-ocr (crop)** | 4.00 | **4.00** | **58%** | 40 |
-| **OCR − heuristic** | +0.00 | **+0.33** | **+8 pts** | — |
+| parser | answer/5 | answerable | retr@4 | chunks | Δ vs heuristic |
+|---|---|---|---|---|---|
+| heuristic (current) | 3.67 | 67% | 50% | 37 | — |
+| ai-md qwen-7B | 3.67 | 67% | 42% | 36 | +0.00 |
+| ai-md Haiku 4.5 | 3.83 | 75% | 42% | **60** | +0.17 |
+| **ai-md Sonnet 5** | **4.33** | **83%** | 50% | 42 | **+0.67** |
+| **unlimited-ocr (crop)** | 4.00 | 75% | **58%** | 40 | +0.33 |
 
-Under the weak local 7B judge, OCR only *tied* the heuristic (both pinned at 4.00 —
-the judge's ceiling). Swapping the referee to **Claude Haiku (~10¢)** separated them:
-**OCR now beats the heuristic on answers (+0.33) as well as retrieval (+8 pts)**, while
-the cheap qwen rewrite still doesn't win on anything. Two independent signals —
-mechanical retrieval and a capable judge — now agree, which is the real strengthener.
+**This overturned an earlier conclusion.** With only qwen-7B tested, AI-rewriting
+looked like a dead end. It wasn't — **rewrite quality scales with model capability**,
+and so does structural restraint: qwen 36 chunks, Haiku over-heads to 60 (retrieval
+drops to 42%), Sonnet settles at 42 and wins outright on answers. The "AI rewriting
+over-fragments" claim was really "*small* models over-fragment."
 
-**Verdict:** with a reliable judge, purpose-built OCR is measurably better than the
-current heuristic *on this corpus*. Still directional (N=12), still tested on
-born-digital PDFs (OCR's weakest footing — its true edge is scans the heuristic can't
-read at all), and adoption still needs a GPU + heading shim + output validation. So:
-a genuinely promising direction and the strongest alternative we tested — not a
-same-day rip-and-replace, but the one worth a real pilot, especially for scanned/PHI.
+**But nobody wins outright — they win at different things:**
+
+| option | strength | cost | PHI |
+|---|---|---|---|
+| heuristic | free, instant, copies exact bytes | $0 | fine |
+| Sonnet 5 rewrite | **best answers** (4.33) | ~5¢/doc forever | ✗ leaves our walls |
+| Unlimited-OCR | **best retrieval** (58%), reads scans | GPU (≈free on our cluster) | ✓ stays in-house |
+
+**Fidelity check** (% of the PDF's numeric facts surviving): qwen-7B **84%** (drops 8
+of 51), Haiku/Sonnet/OCR **100%**. Caveat: this metric detects *vanished* numbers, not
+*wrong* ones — the known-bad whole-page OCR run still scored 93% despite fabricating
+"50"→"60", because "50" appears elsewhere. So 100% means "nothing dropped", NOT
+"nothing altered". A context-aware check is needed before trusting any of this
+clinically.
+
+**Verdict:** no rip-and-replace is justified at N=12. The strongest argument for OCR
+isn't its score — it's the **categorical** capability: it reads scanned documents the
+heuristic returns *nothing* for, and it self-hosts (PHI-safe). Sonnet is the quality
+leader but re-authors every sentence and can't touch patient data. Note the fidelity
+ordering runs *opposite* to the score ranking: heuristic copies bytes → OCR re-reads
+pixels → LLM re-authors. The best score takes the most liberties.
+
+**Not tested:** AI-as-*chunker* (letting a model choose chunk boundaries directly).
+Every config here used our same deterministic chunker; only the parser varied.
 
 ### Does this transfer to clinical documents?
 

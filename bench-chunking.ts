@@ -18,7 +18,7 @@ import { parsePdf } from './src/parser/pdf.js';
 import { parseMarkdown } from './src/parser/markdown.js';
 import { chunkDocument, type Chunk } from './src/chunker/chunker.js';
 
-const B = '\x1b[1m', D = '\x1b[2m', R = '\x1b[0m', G = '\x1b[32m', Y = '\x1b[33m', C = '\x1b[36m', M = '\x1b[35m';
+const B = '\x1b[1m', D = '\x1b[2m', R = '\x1b[0m', G = '\x1b[32m', Y = '\x1b[33m', C = '\x1b[36m', M = '\x1b[35m', RED_C = '\x1b[31m';
 const p = (s = '') => console.log(s);
 const rule = () => p(D + '─'.repeat(74) + R);
 
@@ -73,10 +73,13 @@ function ocrMarkdown(title: string): string {
 
 // The configs (rows). All with #1 filename on = the fair head-to-head of PARSERS:
 // current heuristic vs cheap-LLM rewrite vs specialized OCR (Unlimited-OCR, crop mode).
-type Cfg = { id: string; parser: 'heuristic' | 'ai' | 'ocr'; prompt?: 'naive' | 'constrained'; filename: boolean };
+// 'claude' == Haiku 4.5 (kept as-is so existing rewrite cache keys stay valid).
+type Cfg = { id: string; parser: 'heuristic' | 'ai' | 'ocr'; prompt?: 'naive' | 'constrained'; rewriteModel?: 'qwen' | 'claude' | 'sonnet'; filename: boolean };
 const CONFIGS: Cfg[] = [
   { id: 'heuristic (current)', parser: 'heuristic', filename: true },
-  { id: 'ai-md qwen7b (naive)', parser: 'ai', prompt: 'naive', filename: true },
+  { id: 'ai-md qwen7b (naive)', parser: 'ai', prompt: 'naive', rewriteModel: 'qwen', filename: true },
+  { id: 'ai-md haiku4.5 (naive)', parser: 'ai', prompt: 'naive', rewriteModel: 'claude', filename: true },
+  { id: 'ai-md sonnet5 (naive)', parser: 'ai', prompt: 'naive', rewriteModel: 'sonnet', filename: true },
   { id: 'unlimited-ocr (crop)', parser: 'ocr', filename: true },
 ];
 
@@ -132,13 +135,15 @@ const CONSTRAINED_PROMPT = (raw: string) => `Rewrite the raw PDF-extracted text 
 - Rejoin lines split mid-sentence; separate real paragraphs with a blank line; use "- " bullets only for genuine lists.
 Output ONLY the markdown, no surrounding code fence.\n\n${raw}`;
 
-async function aiMarkdown(file: string, raw: string, variant: 'naive' | 'constrained'): Promise<string> {
-  const key = `${file}::${variant}`;
+async function aiMarkdown(file: string, raw: string, variant: 'naive' | 'constrained', model: 'qwen' | 'claude' | 'sonnet' = 'qwen'): Promise<string> {
+  const key = `${file}::${variant}::${model}`;
   if (rewriteCache[key]) return rewriteCache[key];
   const words = raw.split(/\s+/).length;
   const numCtx = Math.min(32768, Math.max(4096, Math.ceil((words * 1.4 * 2.5 + 512) / 2048) * 2048));
   const prompt = variant === 'constrained' ? CONSTRAINED_PROMPT(raw) : NAIVE_PROMPT(raw);
-  let md = await gen(prompt, { temperature: 0.2, numPredict: -1, numCtx });
+  let md = model === 'qwen'
+    ? await gen(prompt, { temperature: 0.2, numPredict: -1, numCtx })
+    : await claudeGen(prompt, 8192, model === 'sonnet' ? SONNET_MODEL : CLAUDE_MODEL);
   md = md.replace(/^```(?:markdown|md)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
   rewriteCache[key] = md; saveJson('bench-rewrites.json', rewriteCache);
   return md;
@@ -165,20 +170,31 @@ async function makeQuestions(file: string, raw: string): Promise<Q[]> {
 // Referee (reader + judge): use Claude Haiku when a key is present, else local qwen.
 // Only these two roles change — the question set stays the cached local one, so the
 // upgrade isolates "does a stronger referee separate the parsers the 7B couldn't?".
-const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
+const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';  // the referee (judge + reader)
+const SONNET_MODEL = 'claude-sonnet-5';            // stronger rewriter tier
 const USE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
 
-async function claudeGen(prompt: string, maxTokens: number): Promise<string> {
-  const key = sha(`${CLAUDE_MODEL}|${maxTokens}|${prompt}`);
-  if (genCache[key] !== undefined) return genCache[key];
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: maxTokens, temperature: 0, messages: [{ role: 'user', content: prompt }] }),
-  });
-  const j: any = await res.json();
+async function claudeGen(prompt: string, maxTokens: number, model: string = CLAUDE_MODEL): Promise<string> {
+  const key = sha(`${model}|${maxTokens}|${prompt}`);
+  if (genCache[key]) return genCache[key]; // truthy: never serve a cached empty result
+  const call = async (withTemp: boolean) => {
+    const body: any = { model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] };
+    if (withTemp) body.temperature = 0;
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY!, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return r.json() as any;
+  };
+  // temperature is deprecated on newer models (e.g. Sonnet 5) — retry without it.
+  let j = await call(true);
+  if (j.error && /temperature/i.test(j.error.message ?? '')) j = await call(false);
   if (j.error) throw new Error(`Claude ${j.error.type}: ${j.error.message}`);
-  const text = (j.content?.[0]?.text ?? '').trim();
+  // Newer models (Sonnet 5) prepend a `thinking` block, so content[0] is NOT the answer.
+  // Collect every text block instead of assuming the first one.
+  const text = (j.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('').trim();
+  if (!text) throw new Error(`Claude returned no text (stop_reason=${j.stop_reason}, blocks=${(j.content ?? []).map((b: any) => b.type).join(',')})`);
   genCache[key] = text; saveJson('bench-gen.json', genCache);
   return text;
 }
@@ -201,9 +217,10 @@ async function buildCorpus(cfg: Cfg, docTexts: Array<{ file: string; title: stri
     let sections;
     if (cfg.parser === 'heuristic') sections = (await parsePdf(d.buffer)).sections;
     else if (cfg.parser === 'ocr') sections = parseMarkdown(ocrMarkdown(d.title)).sections;
-    else sections = parseMarkdown(await aiMarkdown(d.file, d.raw, cfg.prompt!)).sections;
+    else sections = parseMarkdown(await aiMarkdown(d.file, d.raw, cfg.prompt!, cfg.rewriteModel ?? 'qwen')).sections;
     chunks.push(...chunkDocument(sections, CHUNK_CFG, title));
   }
+  if (chunks.length === 0) throw new Error(`config "${cfg.id}" produced ZERO chunks — parser/rewrite output was empty or unparseable`);
   const embs: number[][] = [];
   for (const c of chunks) embs.push(await embed(c.embeddingText));
   saveJson('bench-emb.json', embCache);
@@ -264,11 +281,22 @@ async function main() {
     p(`    ${col}${cfg.id.padEnd(24)}${R} ${s.answer.toFixed(2).padStart(9)} ${(s.answerable * 100).toFixed(0).padStart(10)}% ${(s.retrieval * 100).toFixed(0).padStart(6)}% ${String(s.chunks).padStart(7)}`);
   }
   rule();
-  const get = (id: string) => results.find(r => r.cfg.id.startsWith(id))!.s.answer;
-  const heur = get('heuristic'), ai = get('ai-md'), ocr = get('unlimited-ocr');
+  const get = (id: string) => results.find(r => r.cfg.id.startsWith(id))?.s.answer ?? NaN;
+  const heur = get('heuristic');
   const d2 = (x: number) => (x >= 0 ? '+' : '') + x.toFixed(2);
-  p(`    ${B}unlimited-ocr vs heuristic:${R}  ${d2(ocr - heur)} answer/5`);
-  p(`    ${B}qwen-rewrite  vs heuristic:${R}  ${d2(ai - heur)} answer/5`);
+  p('    ' + D + 'vs the current heuristic parser:' + R);
+  for (const [label, id] of [
+    ['qwen-7B rewrite', 'ai-md qwen7b'],
+    ['Haiku 4.5 rewrite', 'ai-md haiku4.5'],
+    ['Sonnet 5 rewrite', 'ai-md sonnet5'],
+    ['Unlimited-OCR', 'unlimited-ocr'],
+  ] as const) {
+    const v = get(id);
+    if (!Number.isNaN(v)) {
+      const d = v - heur;
+      p(`      ${(label + ':').padEnd(20)} ${d > 0 ? G : d < 0 ? RED_C : D}${B}${d2(d)}${R} answer/5`);
+    }
+  }
   rule();
 }
 
