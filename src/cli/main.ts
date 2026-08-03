@@ -360,19 +360,39 @@ async function main(): Promise<void> {
         }
 
         logger.info(`Querying index at ${dbPath}...`);
+        // --exclude-denied drops results a note explicitly denies (assertion=absent).
+        const excludeAssertions = args['exclude-denied'] ? ['absent'] : undefined;
         const results = await queryIndex({
           dbPath,
           query: args.hybrid,
           k: args.k,
-          embeddingModel: args['embedding-model']
+          embeddingModel: args['embedding-model'],
+          excludeAssertions
         });
 
         console.log('\n--- Results ---\n');
+        if (excludeAssertions) {
+          console.log('(filtering out findings the note denies: assertion=absent)\n');
+        }
         for (const [i, result] of results.entries()) {
-          console.log(`${i + 1}. [${result.score.toFixed(4)}] ${result.title}`);
+          const a = (result.assertion || 'unspecified').toLowerCase();
+          const tag = a !== 'unspecified' ? `  [assertion: ${a.toUpperCase()}]` : '';
+          console.log(`${i + 1}. [${result.score.toFixed(4)}] ${result.title}${tag}`);
           console.log(`   URL: ${result.url}`);
           console.log(`   Headings: ${result.headings.join(' > ')}`);
-          console.log(`   Chunk: ${result.chunk_id}`);
+          // Per-finding assertions (Phase 2): each clinical finding tagged from the prose.
+          const findings = JSON.parse(result.findings || '[]') as Array<{ finding: string; assertion: string; temporality?: string; evidence: string }>;
+          if (findings.length > 0) {
+            console.log(`   Per-finding:`);
+            for (const f of findings) {
+              const ev = f.evidence === 'stated' ? 'no negation cue → present'
+                : f.evidence === 'heading' ? 'from the section heading'
+                : `cue: "${f.evidence}"`;
+              // Temporality is a separate axis; only surface it when it's not the default 'recent'.
+              const when = f.temporality && f.temporality !== 'recent' ? ` [${f.temporality}]` : '';
+              console.log(`     • ${f.finding} → ${f.assertion.toUpperCase()}${when}  (${ev})`);
+            }
+          }
           console.log('');
         }
         break;
