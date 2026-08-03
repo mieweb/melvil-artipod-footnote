@@ -209,6 +209,26 @@ When citing sources in your answer:
 - If search results show [1], [2], [5] - use those exact numbers, not [1], [2], [3]`;
 
 /**
+ * Assertion-awareness directive — appended to every system prompt so answers respect
+ * the clinical assertion tags surfaced in search results (issue #15, Phase 2).
+ */
+const ASSERTION_DIRECTIVE = `
+
+## CLINICAL ASSERTIONS (CRITICAL)
+
+Some search results are tagged with a clinical assertion status, e.g. "(assertion: ABSENT)":
+- ABSENT — the source explicitly DENIES or rules out that finding. NEVER report it as present; state that it was denied/absent, and you may still cite it.
+- POSSIBLE — uncertain / part of a differential. Report as possible, not confirmed.
+- HISTORICAL — a past condition, not necessarily current.
+- Results with no tag (or PRESENT) are asserted normally.
+Honor these tags: a finding listed under a "Negative for" section is NOT present.
+
+A result may also list a "Per-finding:" line (e.g. "chest pain = ABSENT; leg weakness = PRESENT").
+This is MORE specific than the passage-level tag — a single sentence can deny one finding while
+reporting another. When it's present, answer about each finding using ITS OWN status, not the
+passage-level one.`;
+
+/**
  * Build the system prompt by interpolating {{TOOLS}} placeholder with actual tools definition
  * and appending the FINAL: directive for reliable answer detection.
  */
@@ -216,8 +236,8 @@ function buildSystemPrompt(manifest: ManifestData): string {
   const template = manifest.agent?.system_prompt || DEFAULT_SYSTEM_PROMPT;
   const toolsDefinition = buildToolsDefinition(manifest);
   const basePrompt = template.replace('{{TOOLS}}', toolsDefinition.trim());
-  // Always append the final answer directive for reliable detection
-  return basePrompt + FINAL_ANSWER_DIRECTIVE;
+  // Always append the final answer + assertion directives
+  return basePrompt + FINAL_ANSWER_DIRECTIVE + ASSERTION_DIRECTIVE;
 }
 
 /**
@@ -324,6 +344,10 @@ interface SearchResult {
   headings: string[];
   content: string;
   score: number;
+  /** Clinical assertion status (Phase 2). Surfaced to the LLM so it respects negation. */
+  assertion?: string;
+  /** Per-finding assertions (Phase 2) as a JSON string, hydrated before formatting. */
+  findings?: string;
   method: 'hybrid' | 'fts' | 'literal' | 'document' | 'related' | 'grep';
   vectorRank?: number;
   ftsRank?: number;
@@ -392,6 +416,7 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
         headings: r.headings,
         content: r.content,
         score: r.score,
+        assertion: r.assertion,
         method: 'hybrid' as const,
         vectorRank: r.vectorRank,
         ftsRank: r.ftsRank
@@ -410,6 +435,7 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
         headings: r.headings,
         content: r.content,
         score: -r.bm25Score,
+        assertion: r.assertion,
         method: 'fts' as const,
         ftsRank: i + 1
       }));
@@ -427,6 +453,7 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
         headings: r.headings,
         content: r.content,
         score: r.matchCount,
+        assertion: r.assertion,
         method: 'literal' as const,
         ftsRank: i + 1  // Use ftsRank for display consistency
       }));
@@ -644,6 +671,11 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
     return errorResult(`No results found for "${query}"`);
   }
 
+  // Hydrate per-finding assertions (Phase 2) so the model can reason per finding —
+  // e.g. a chunk where one finding is denied and another is present.
+  const findingsByChunk = ctx.store.getFindingsByChunkIds(results.map(r => r.chunk_id));
+  for (const r of results) r.findings = findingsByChunk.get(r.chunk_id);
+
   // Add results to context (deduplicated)
   for (const r of results) {
     if (!ctx.searchResults.has(r.chunk_id)) {
@@ -673,13 +705,38 @@ async function executeTool(toolCall: ToolCall, ctx: AgentContext): Promise<ToolE
   }
 
   // Format results for the LLM - include FULL content, not just snippets
+  // Explicit assertion guidance per status. Scoped to THIS passage so the model
+  // doesn't over-apply "absent" to findings that appear (present) in other passages.
+  const ASSERTION_NOTE: Record<string, string> = {
+    absent: '[Assertion: the specific findings named in THIS passage are documented as ABSENT/denied. Applies ONLY to findings stated here — not to findings in other passages.]',
+    possible: '[Assertion: findings in THIS passage are POSSIBLE/uncertain (a differential), not confirmed.]',
+    historical: '[Assertion: findings in THIS passage are HISTORICAL — past, not necessarily current.]',
+  };
   const formatted = results.map((r, i) => {
     const globalIdx = ctx.resultOrder.indexOf(r.chunk_id) + 1;
     const location = r.headings.length > 0
       ? `${r.title} > ${r.headings.join(' > ')}`
       : r.title;
+    // Surface the clinical assertion so the LLM doesn't report a denied finding as present.
+    const a = (r.assertion || 'unspecified').toLowerCase();
+    const tag = a !== 'unspecified' ? ` (assertion: ${a.toUpperCase()})` : '';
+    const note = ASSERTION_NOTE[a] ? `\n    ${ASSERTION_NOTE[a]}` : '';
+    // Per-finding assertions (Phase 2): specific findings tagged individually from the
+    // prose. More precise than the chunk-level tag — a single passage can have both.
+    let perFinding = '';
+    try {
+      const fs = JSON.parse(r.findings || '[]') as Array<{ finding: string; assertion: string; temporality?: string }>;
+      if (fs.length > 0) {
+        perFinding = '\n    Per-finding: ' + fs.map(f => {
+          // Flag historical/hypothetical so the model doesn't report a past or conditional
+          // finding as a current one; 'recent' is the default and left unlabeled.
+          const when = f.temporality && f.temporality !== 'recent' ? ` (${f.temporality})` : '';
+          return `${f.finding} = ${f.assertion.toUpperCase()}${when}`;
+        }).join('; ');
+      }
+    } catch { /* ignore malformed findings */ }
     // Include full content so LLM can actually read the documents
-    return `[${globalIdx}] ${location}\n    URL: ${r.url}\n\n${r.content}`;
+    return `[${globalIdx}]${tag} ${location}\n    URL: ${r.url}${note}${perFinding}\n\n${r.content}`;
   }).join('\n\n---\n\n');
 
   // Build chunk metadata for streaming
