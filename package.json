@@ -72,7 +72,7 @@
     "@anthropic-ai/tokenizer": "^0.0.4",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/pdf-parse": "^1.1.5",
-    "better-sqlite3": "^11.6.0",
+    "better-sqlite3": "^13.0.3",
     "fast-xml-parser": "^5.11.1",
     "js-yaml": "^5.4.1",
     "mammoth": "^1.12.2",
