@@ -1,0 +1,42 @@
+# Melvil Configuration
+# This file controls embedding model selection, chunking, and build behavior.
+# CLI arguments override these values.
+
+[project]
+content_dir = "."
+out_dir = "./.footnote"
+include_drafts = false
+
+[embedding]
+# Provider: "fastembed" (local ONNX) | "ollama" | "openai"
+provider = "fastembed"
+
+# Available fastembed models:
+#   bge-small-en-v1.5      (384 dim, 33M params, fastest)
+#   bge-base-en-v1.5       (768 dim, 110M params, balanced)
+#   bge-large-en-v1.5      (1024 dim, 335M params, best quality)
+#   all-MiniLM-L6-v2       (384 dim, 22M params, lightweight)
+#   all-MiniLM-L12-v2      (384 dim, 33M params)
+#   nomic-embed-text-v1.5  (768 dim, 137M params, long context)
+model = "bge-small-en-v1.5"
+
+# Dimension override (auto-detected from model if omitted)
+# dimension = 384
+
+# Show download progress bar when fetching model files
+show_download_progress = true
+
+# Custom cache directory for ONNX model files (default: .fastembed_cache)
+# cache_dir = "/path/to/model/cache"
+
+[chunking]
+max_tokens = 500
+overlap = 80
+
+[storage]
+compress = false
+copy_content = false
+
+[filters]
+# Add content filters as key-value pairs
+# brand = "myproject"
