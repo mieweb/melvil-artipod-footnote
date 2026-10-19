@@ -28,6 +28,10 @@ export interface ChunkRecord {
   headings: string[];
   content: string;
   content_hash: string;
+  /** Chunk-level clinical assertion status (Phase 2): present|absent|possible|historical|unspecified. */
+  assertion: string;
+  /** Per-finding assertions (Phase 2, bullet 2) as a JSON string. Optional: only some reads hydrate it. */
+  findings?: string;
   updated_at: number;
   vector: number[];
 }
@@ -107,13 +111,29 @@ export class SqliteStore {
         headings TEXT NOT NULL,
         content TEXT NOT NULL,
         content_hash TEXT NOT NULL,
+        assertion TEXT NOT NULL DEFAULT 'unspecified',
+        findings TEXT NOT NULL DEFAULT '[]',
         updated_at INTEGER NOT NULL
       );
 
       CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id);
       CREATE INDEX IF NOT EXISTS idx_chunks_path ON chunks(path);
       CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash);
+      CREATE INDEX IF NOT EXISTS idx_chunks_assertion ON chunks(assertion);
     `);
+
+    // Forward-migrate an existing index that predates the assertion column (Phase 2).
+    // CREATE TABLE IF NOT EXISTS won't add a column to a table that already exists.
+    try {
+      this.db.exec(`ALTER TABLE chunks ADD COLUMN assertion TEXT NOT NULL DEFAULT 'unspecified'`);
+    } catch {
+      // Column already exists — nothing to do.
+    }
+    try {
+      this.db.exec(`ALTER TABLE chunks ADD COLUMN findings TEXT NOT NULL DEFAULT '[]'`);
+    } catch {
+      // Column already exists — nothing to do.
+    }
 
     // Vector table using sqlite-vec (vec0)
     this.db.exec(`
@@ -153,9 +173,9 @@ export class SqliteStore {
 
   private prepareStatements(): void {
     this.insertChunkStmt = this.db.prepare(`
-      INSERT OR REPLACE INTO chunks 
-      (chunk_id, doc_id, path, url, title, section, tags, date, headings, content, content_hash, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO chunks
+      (chunk_id, doc_id, path, url, title, section, tags, date, headings, content, content_hash, assertion, findings, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.insertVectorStmt = this.db.prepare(`
@@ -193,6 +213,8 @@ export class SqliteStore {
           JSON.stringify(chunk.headings),
           chunk.content,
           chunk.content_hash,
+          chunk.assertion,
+          chunk.findings ?? '[]',
           chunk.updated_at
         );
 
@@ -253,6 +275,7 @@ export class SqliteStore {
         c.headings,
         c.content,
         c.content_hash,
+        c.assertion,
         c.updated_at
       FROM vec_chunks v
       JOIN chunks c ON v.chunk_id = c.chunk_id
@@ -271,6 +294,7 @@ export class SqliteStore {
       headings: string;
       content: string;
       content_hash: string;
+      assertion: string;
       updated_at: number;
     }>;
 
@@ -286,6 +310,7 @@ export class SqliteStore {
       headings: JSON.parse(row.headings),
       content: row.content,
       content_hash: row.content_hash,
+      assertion: row.assertion,
       updated_at: row.updated_at,
       vector: [], // Don't return vectors in search results
       distance: row.distance
@@ -319,6 +344,7 @@ export class SqliteStore {
           c.headings,
           c.content,
           c.content_hash,
+          c.assertion,
           c.updated_at
         FROM chunks_fts f
         JOIN chunks c ON f.chunk_id = c.chunk_id
@@ -338,6 +364,7 @@ export class SqliteStore {
         headings: string;
         content: string;
         content_hash: string;
+        assertion: string;
         updated_at: number;
       }>;
 
@@ -353,6 +380,7 @@ export class SqliteStore {
         headings: JSON.parse(row.headings),
         content: row.content,
         content_hash: row.content_hash,
+        assertion: row.assertion,
         updated_at: row.updated_at,
         vector: [],
         bm25Score: row.bm25_score
@@ -388,6 +416,7 @@ export class SqliteStore {
         headings,
         content,
         content_hash,
+        assertion,
         updated_at,
         (LENGTH(content) - LENGTH(REPLACE(LOWER(content), LOWER(?), ''))) / LENGTH(?) as match_count
       FROM chunks
@@ -406,6 +435,7 @@ export class SqliteStore {
       headings: string;
       content: string;
       content_hash: string;
+      assertion: string;
       updated_at: number;
       match_count: number;
     }>;
@@ -422,6 +452,7 @@ export class SqliteStore {
       headings: JSON.parse(row.headings),
       content: row.content,
       content_hash: row.content_hash,
+      assertion: row.assertion,
       updated_at: row.updated_at,
       vector: [],
       matchCount: row.match_count
@@ -558,6 +589,21 @@ export class SqliteStore {
   }
 
   /**
+   * Fetch the per-finding assertions (JSON string) for a set of chunk IDs (Phase 2).
+   * Lets the search/query path surface findings without hydrating them on every result.
+   */
+  getFindingsByChunkIds(chunkIds: string[]): Map<string, string> {
+    const result = new Map<string, string>();
+    if (chunkIds.length === 0) return result;
+    const placeholders = chunkIds.map(() => '?').join(',');
+    const rows = this.db.prepare(
+      `SELECT chunk_id, findings FROM chunks WHERE chunk_id IN (${placeholders})`
+    ).all(...chunkIds) as { chunk_id: string; findings: string }[];
+    for (const r of rows) result.set(r.chunk_id, r.findings);
+    return result;
+  }
+
+  /**
    * Remove multiple file tracking infos
    */
   removeFileInfos(filePaths: string[]): void {
@@ -599,8 +645,8 @@ export class SqliteStore {
     const rows = this.db.prepare(`
       SELECT 
         chunk_id, doc_id, path, url, title, section, 
-        tags, date, headings, content, content_hash, updated_at
-      FROM chunks 
+        tags, date, headings, content, content_hash, assertion, findings, updated_at
+      FROM chunks
       WHERE doc_id = ? OR url = ? OR url LIKE ? OR url LIKE ?
       ORDER BY chunk_id
     `).all(docIdOrUrl, docIdOrUrl, `%${docIdOrUrl}%`, `%${normalized}%`) as Array<{
@@ -615,6 +661,8 @@ export class SqliteStore {
       headings: string;
       content: string;
       content_hash: string;
+      assertion: string;
+      findings: string;
       updated_at: number;
     }>;
 
@@ -630,6 +678,8 @@ export class SqliteStore {
       headings: JSON.parse(row.headings),
       content: row.content,
       content_hash: row.content_hash,
+      assertion: row.assertion,
+      findings: row.findings,
       updated_at: row.updated_at,
       vector: []
     }));
