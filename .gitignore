@@ -24,3 +24,9 @@ npm-debug.log*
 .env.local
 .playwright-mcp
 .footnote/
+
+# Third-party eval corpora (fetched, not vendored)
+data/*.txt
+
+# E3C corpus (CC BY-NC, fetched not vendored)
+data/e3c_en/

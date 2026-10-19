@@ -50,21 +50,21 @@ async function buildFixture(): Promise<string> {
       url: '/functions/patient-registration/', title: 'Patient Registration',
       section: 'Overview', tags: ['registration'], date: '2025-01-01',
       headings: ['Patient Registration', 'Overview'], content: texts[0],
-      content_hash: 'aaa', updated_at: Date.now(), vector: vectors[0]
+      content_hash: 'aaa', assertion: 'unspecified', updated_at: Date.now(), vector: vectors[0]
     },
     {
       chunk_id: 'ch_reg_2', doc_id: 'doc_registration', path: 'patient-registration.md',
       url: '/functions/patient-registration/', title: 'Patient Registration',
       section: 'HL7 Interface', tags: ['registration', 'hl7'], date: '2025-01-01',
       headings: ['Patient Registration', 'HL7 Interface'], content: texts[1],
-      content_hash: 'bbb', updated_at: Date.now(), vector: vectors[1]
+      content_hash: 'bbb', assertion: 'unspecified', updated_at: Date.now(), vector: vectors[1]
     },
     {
       chunk_id: 'ch_sched_1', doc_id: 'doc_scheduling', path: 'scheduling.md',
       url: '/functions/scheduling/', title: 'Scheduling',
       section: 'Appointments', tags: ['scheduling'], date: '2025-01-02',
       headings: ['Scheduling', 'Appointments'], content: texts[2],
-      content_hash: 'ccc', updated_at: Date.now(), vector: vectors[2]
+      content_hash: 'ccc', assertion: 'unspecified', updated_at: Date.now(), vector: vectors[2]
     }
   ]);
 
