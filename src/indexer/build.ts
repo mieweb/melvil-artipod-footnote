@@ -290,38 +290,42 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
         };
       });
 
-      // Generate embeddings for this file's chunks, using cache where possible
-      const contentHashes = chunkRecords.map(c => c.content_hash);
-      const cachedEmbeddings = embeddingCache.getMany(contentHashes);
-      
+      // Generate embeddings for this file's chunks, using cache where possible.
+      // We embed and cache by embeddingHash (derived from the context-rendered
+      // embeddingText), NOT content_hash: two chunks with identical bodies under
+      // different headings must not share a vector. chunks[] is index-aligned with
+      // chunkRecords[] (built by .map above).
+      const embeddingHashes = chunks.map(c => c.embeddingHash);
+      const cachedEmbeddings = embeddingCache.getMany(embeddingHashes);
+
       // Find which chunks need new embeddings
       const uncachedIndices: number[] = [];
       const uncachedTexts: string[] = [];
-      for (let i = 0; i < chunkRecords.length; i++) {
-        if (!cachedEmbeddings.has(chunkRecords[i].content_hash)) {
+      for (let i = 0; i < chunks.length; i++) {
+        if (!cachedEmbeddings.has(chunks[i].embeddingHash)) {
           uncachedIndices.push(i);
-          uncachedTexts.push(chunkRecords[i].content);
+          uncachedTexts.push(chunks[i].embeddingText);
         }
       }
-      
+
       // Generate embeddings only for uncached chunks
       let newEmbeddings: number[][] = [];
       if (uncachedTexts.length > 0) {
         newEmbeddings = await embedder.embed(uncachedTexts);
-        
-        // Cache the new embeddings
+
+        // Cache the new embeddings, keyed by embeddingHash
         const toCache = new Map<string, number[]>();
         for (let i = 0; i < uncachedIndices.length; i++) {
-          const hash = chunkRecords[uncachedIndices[i]].content_hash;
+          const hash = chunks[uncachedIndices[i]].embeddingHash;
           toCache.set(hash, newEmbeddings[i]);
         }
         embeddingCache.setMany(toCache);
       }
-      
+
       // Assign embeddings to chunk records (cached + new)
       let newEmbIdx = 0;
       for (let i = 0; i < chunkRecords.length; i++) {
-        const cached = cachedEmbeddings.get(chunkRecords[i].content_hash);
+        const cached = cachedEmbeddings.get(chunks[i].embeddingHash);
         if (cached) {
           chunkRecords[i].vector = cached;
         } else {
